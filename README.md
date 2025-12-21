@@ -83,7 +83,11 @@ This agent functions as a **data entry assistant only**—it does NOT perform cl
 ### Prerequisites
 
 - Docker & Docker Compose
-- NVIDIA GPU with CUDA 11.8+ (recommended) or CPU-only mode
+- **NVIDIA GPU with CUDA 11.8+** (recommended) or CPU-only mode
+  - ✅ **RTX 5090 / Blackwell** - Fully optimized (see [Blackwell GPU Guide](./docs/BLACKWELL_GPU.md))
+  - ✅ RTX 40 Series (4090, 4080, 4070)
+  - ✅ RTX 30 Series (3090, 3080, 3070, 3060)
+  - ✅ RTX 20 Series (2080 Ti, 2080, 2060)
 - Google Cloud Project (Gmail, Sheets, Drive APIs enabled)
 - NCB API credentials
 
@@ -429,6 +433,7 @@ python scripts/init_sheets.py    # Create audit log spreadsheet
 | **[docs/DOCKER.md](./docs/DOCKER.md)** | Docker Deployment Guide | 315+ |
 | **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)** | Production Deployment Procedures | 1,056+ |
 | **[docs/NCB_SCHEMA_UPDATE.md](./docs/NCB_SCHEMA_UPDATE.md)** | NCB API Integration Details | 200+ |
+| **[docs/BLACKWELL_GPU.md](./docs/BLACKWELL_GPU.md)** | RTX 5090 / Blackwell GPU Optimization | 400+ |
 
 ---
 
