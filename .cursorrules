@@ -1,0 +1,174 @@
+# Claims Data Entry Agent - Cursor Rules
+
+## Project Overview
+You are building a Claims Data Entry Agent - an internal automation tool for a TPA that extracts claim data from emails and enters it into the NCB core processing system. This is a data entry assistant only, NOT a claims adjudication system.
+
+## Critical Constraints
+
+### This Agent Does NOT:
+- Validate claims against policy rules
+- Check member eligibility  
+- Approve or reject claims
+- Communicate with members
+- Replace claims processors
+
+### This Agent DOES:
+- Monitor Gmail for claim emails
+- Extract data from receipts using PaddleOCR-VL
+- Submit structured data to NCB API
+- Maintain audit trails in Google Sheets
+- Archive attachments to Google Drive
+- Flag low-confidence extractions
+
+## Tech Stack (Non-Negotiable)
+- Python 3.10+
+- FastAPI for REST API
+- PaddleOCR-VL (0.9B) for OCR
+- Redis for job queuing
+- Docker for deployment
+- Gmail API, Google Sheets API, Google Drive API
+
+## Code Standards
+
+### Always Use:
+- Type hints on all functions and methods
+- Pydantic models for all data structures
+- Async/await for I/O operations
+- Structured logging with structlog
+- Custom exceptions with clear error messages
+
+### File Organization:
+```
+src/
+├── config/settings.py     # Pydantic Settings
+├── models/               # Pydantic models
+├── services/             # Business logic
+├── workers/              # Background workers
+├── api/routes/           # FastAPI endpoints
+└── utils/                # Helper functions
+```
+
+### Naming Conventions:
+- Files: snake_case.py
+- Classes: PascalCase
+- Functions/methods: snake_case
+- Constants: UPPER_SNAKE_CASE
+- Private: _leading_underscore
+
+## OCR Integration Pattern
+
+```python
+from paddleocr import PaddleOCR
+
+# Always initialize with these settings
+ocr = PaddleOCR(
+    use_angle_cls=True,
+    lang='en',  # or 'ch', 'ms', 'ta'
+    use_gpu=True,
+    show_log=False
+)
+```
+
+## Confidence Thresholds
+- HIGH (≥90%): Auto-submit to NCB
+- MEDIUM (75-89%): Submit with review flag
+- LOW (<75%): Route to exception queue
+
+## Data Fields to Extract
+1. member_id (required)
+2. member_name (required)
+3. provider_name (required)
+4. provider_address (optional)
+5. service_date (required)
+6. receipt_number (required)
+7. total_amount (required)
+8. itemized_charges (optional)
+9. gst_sst_amount (optional)
+
+## Error Handling Priority
+1. NEVER lose data - always log to Sheets if NCB fails
+2. Retry transient failures with exponential backoff
+3. Alert on persistent failures
+4. Maintain complete audit trail
+
+## Security Requirements
+- All processing on-premise (no external AI services)
+- PDPA compliance for medical data
+- Credentials in environment variables only
+- No PHI in logs
+
+## Testing Requirements
+- Unit tests for all services
+- Mock external services in tests
+- Test Malaysian receipt formats specifically
+- Test multi-language extraction (EN, MS, ZH, TA)
+
+## When Implementing New Features:
+1. Check PRD.md for requirements
+2. Check TECHNICAL_SPEC.md for architecture
+3. Check API_CONTRACTS.md for API specs
+4. Check DEVELOPMENT_TASKS.md for task breakdown
+5. Follow existing patterns in codebase
+6. Add appropriate tests
+7. Update documentation if needed
+
+## Common Patterns
+
+### Service Class Pattern:
+```python
+class MyService:
+    def __init__(self, config: MyConfig):
+        self.config = config
+        self._client = None
+    
+    async def initialize(self) -> None:
+        """Initialize connections"""
+        pass
+    
+    async def close(self) -> None:
+        """Cleanup resources"""
+        pass
+```
+
+### Worker Pattern:
+```python
+class MyWorker:
+    async def run(self) -> None:
+        """Main worker loop"""
+        while True:
+            try:
+                job = await self.queue.dequeue()
+                if job:
+                    await self.process(job)
+                else:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error("Worker error", error=str(e))
+```
+
+### API Endpoint Pattern:
+```python
+@router.get("/items/{item_id}")
+async def get_item(
+    item_id: str,
+    service: MyService = Depends(get_service)
+) -> ItemResponse:
+    """Get item by ID"""
+    item = await service.get(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+    return ItemResponse(data=item)
+```
+
+## Malaysian Receipt Specifics
+- Currency: RM (Malaysian Ringgit)
+- Date formats: DD/MM/YYYY, DD-MM-YYYY
+- GST/SST: 6% GST (pre-2018), 10% SST (current)
+- Languages: English, Malay, Chinese, Tamil
+- Common providers: Hospital, Klinik, Pharmacy
+
+## Reference Documents
+- docs/PRD.md - Product requirements
+- docs/TECHNICAL_SPEC.md - Technical architecture
+- docs/API_CONTRACTS.md - API specifications
+- docs/DEVELOPMENT_TASKS.md - Task breakdown

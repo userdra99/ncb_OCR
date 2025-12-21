@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Credentials
+*.json
+!pyproject.toml
+credentials/
+secrets/
+token.json
+gmail_token.json
+sheets_credentials.json
+drive_credentials.json
+
+# Logs
+logs/
+*.log
+
+# Data
+data/
+temp/
+tmp/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# OCR models (downloaded at runtime)
+*.pdparams
+*.pdiparams
+models/
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Swarm coordination
+.hive-mind/
+.swarm/
+.claude-flow/
