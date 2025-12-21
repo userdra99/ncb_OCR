@@ -82,6 +82,11 @@ services:
       - OCR_BATCH_SIZE=8
       - OCR_MAX_IMAGE_SIZE=4096
 
+      # GPU Configuration (Blackwell RTX 5090 compatible)
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - GPU_TYPE=${GPU_TYPE:-}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
       # Storage
       - TEMP_STORAGE_PATH=/app/data/temp
       - TEMP_FILE_MAX_AGE_HOURS=24
@@ -111,8 +116,9 @@ services:
           memory: 4G
           devices:
             - driver: nvidia
-              count: 1
+              count: ${GPU_COUNT:-1}
               capabilities: [gpu]
+    shm_size: ${SHM_SIZE:-16gb}
     networks:
       - claims-network
     healthcheck:
@@ -154,6 +160,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - OCR_USE_GPU=true
       - OCR_BATCH_SIZE=8
+      # GPU Configuration
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - GPU_TYPE=${GPU_TYPE:-}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     env_file:
       - .env.production
     volumes:
@@ -172,8 +182,9 @@ services:
           memory: 4G
           devices:
             - driver: nvidia
-              count: 1
+              count: ${GPU_COUNT:-1}
               capabilities: [gpu]
+    shm_size: ${SHM_SIZE:-16gb}
     networks:
       - claims-network
     logging:

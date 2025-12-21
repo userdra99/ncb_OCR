@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies including monitoring tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 \
     python3.10-dev \
@@ -27,6 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
     ca-certificates \
+    curl \
+    htop \
+    nvtop \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Create symbolic link for python
@@ -47,7 +51,9 @@ WORKDIR /build
 COPY pyproject.toml requirements.txt ./
 
 # Install Python dependencies in a virtual environment
+# Update NCCL for RTX 5090 / Blackwell GPU support
 RUN python -m pip install --prefix=/install \
+    nvidia-nccl-cu12>=2.26.5 \
     paddlepaddle-gpu==2.5.0 \
     fastapi>=0.104.0 \
     uvicorn[standard]>=0.24.0 \
@@ -66,7 +72,9 @@ RUN python -m pip install --prefix=/install \
     opencv-python>=4.8.0 \
     httpx>=0.25.0 \
     structlog>=23.2.0 \
-    tenacity>=8.2.0
+    tenacity>=8.2.0 \
+    prometheus-client>=0.19.0 \
+    uvloop>=0.19.0
 
 # =============================================================================
 # Stage 3: Production runtime image

@@ -95,8 +95,48 @@ verify_gpu() {
         log_info "Verifying GPU availability..."
 
         if command -v nvidia-smi &> /dev/null; then
-            nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+            # Display GPU information
+            GPU_INFO=$(nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader)
+            echo "$GPU_INFO"
             log_info "GPU is available and ready"
+
+            # Detect GPU type for optimizations
+            GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader)
+
+            # Set PYTORCH optimizations for all GPUs
+            export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
+            # Apply RTX 5090 / Blackwell-specific optimizations
+            if echo "$GPU_NAME" | grep -qi "RTX 5090\|RTX 50"; then
+                log_info "Detected Blackwell GPU (RTX 5090) - Applying optimizations..."
+                export GPU_TYPE="RTX5090"
+
+                # NCCL optimizations for RTX 5090
+                export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
+                export NCCL_MIN_NRINGS="${NCCL_MIN_NRINGS:-2}"
+                export NCCL_MAX_NRINGS="${NCCL_MAX_NRINGS:-4}"
+                export NCCL_TREE_THRESHOLD="${NCCL_TREE_THRESHOLD:-0}"
+                export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-5}"
+                export NCCL_P2P_LEVEL="${NCCL_P2P_LEVEL:-SYS}"
+                export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-0}"
+                export NCCL_SHM_DISABLE="${NCCL_SHM_DISABLE:-0}"
+
+                log_info "RTX 5090 optimizations applied"
+            elif echo "$GPU_NAME" | grep -qi "RTX 40\|RTX 4090\|RTX 4080"; then
+                log_info "Detected Ada Lovelace GPU - Applying optimizations..."
+                export GPU_TYPE="RTX40"
+            elif echo "$GPU_NAME" | grep -qi "RTX 30\|RTX 3090\|RTX 3080"; then
+                log_info "Detected Ampere GPU - Standard configuration"
+                export GPU_TYPE="RTX30"
+            elif echo "$GPU_NAME" | grep -qi "RTX 20\|RTX 2080\|RTX 2060"; then
+                log_info "Detected Turing GPU - Standard configuration"
+                export GPU_TYPE="RTX20"
+            else
+                log_info "GPU detected: $GPU_NAME - Using default configuration"
+                export GPU_TYPE="GENERIC"
+            fi
+
+            log_info "PYTORCH_CUDA_ALLOC_CONF=$PYTORCH_CUDA_ALLOC_CONF"
         else
             log_warn "GPU requested but nvidia-smi not found - falling back to CPU mode"
             export OCR_USE_GPU=false
