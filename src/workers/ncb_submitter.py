@@ -92,7 +92,7 @@ class NCBSubmitterWorker:
         try:
             # Validate required fields
             claim = job.extraction_result.claim
-            if not claim.member_id or not claim.total_amount:
+            if not claim.total_amount or not claim.service_date:
                 logger.error(
                     "Missing required fields for NCB submission",
                     job_id=job.id,
@@ -100,27 +100,31 @@ class NCBSubmitterWorker:
                 await self.queue_service.update_job_status(
                     job.id,
                     JobStatus.EXCEPTION,
-                    error_message="Missing required fields (member_id or total_amount)",
+                    error_message="Missing required fields (total_amount or service_date)",
                 )
                 return
 
-            # Build NCB request
+            # Ensure policy_number is available (required by NCB)
+            policy_number = claim.policy_number or claim.member_id
+            if not policy_number:
+                logger.error(
+                    "Missing policy number for NCB submission",
+                    job_id=job.id,
+                )
+                await self.queue_service.update_job_status(
+                    job.id,
+                    JobStatus.EXCEPTION,
+                    error_message="Missing policy number (policy_number or member_id)",
+                )
+                return
+
+            # Build NCB request with exact schema field names
             ncb_request = NCBSubmissionRequest(
-                member_id=claim.member_id,
-                member_name=claim.member_name or "Unknown",
-                provider_name=claim.provider_name or "Unknown Provider",
-                provider_address=claim.provider_address,
-                service_date=claim.service_date.isoformat() if claim.service_date else "",
-                receipt_number=claim.receipt_number or "",
-                total_amount=claim.total_amount,
-                currency=claim.currency,
-                itemized_charges=(
-                    [charge.model_dump() for charge in claim.itemized_charges]
-                    if claim.itemized_charges
-                    else None
-                ),
-                gst_amount=claim.gst_amount,
-                sst_amount=claim.sst_amount,
+                event_date=claim.service_date.isoformat(),  # Maps to "Event date"
+                submission_date=datetime.now().isoformat(),  # Maps to "Submission Date"
+                claim_amount=claim.total_amount,  # Maps to "Claim Amount"
+                invoice_number=claim.receipt_number or "",  # Maps to "Invoice Number"
+                policy_number=policy_number,  # Maps to "Policy Number"
                 source_email_id=job.email_id,
                 source_filename=job.attachment_filename,
                 extraction_confidence=job.extraction_result.confidence_score,

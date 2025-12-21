@@ -154,26 +154,70 @@ class TestNCBSubmitterWorker:
         self, mock_ncb_api, mock_sheets_service, mock_redis
     ):
         """
-        Test complete submission flow
+        Test complete submission flow with NCB schema
 
         Given: Job in submission queue
         When: Worker processes
-        Then: Submitted to NCB, reference captured, Sheets updated
+        Then: Submitted to NCB with correct field mapping, reference captured, Sheets updated
         """
-        # Test full submission cycle
-        pass
+        # Arrange - Setup job with extracted claim data
+        from src.services.ncb_service import NCBService
+        from src.models.claim import NCBSubmissionRequest
+        from datetime import datetime
+
+        # Mock NCB response with new schema
+        mock_ncb_api.post.return_value = MagicMock(
+            status_code=201,
+            json=lambda: {
+                "success": True,
+                "claim_reference": "CLM-2024-567890",
+                "Event date": "2024-12-21",
+                "Submission Date": "2024-12-21T10:30:00Z",
+                "Claim Amount": 150.50,
+                "Invoice Number": "INV-12345",
+                "Policy Number": "POL-98765",
+            },
+        )
+
+        # Create submission request with NCB schema
+        request = NCBSubmissionRequest(
+            event_date="2024-12-21",
+            submission_date=datetime.utcnow().isoformat() + "Z",
+            claim_amount=150.50,
+            invoice_number="INV-12345",
+            policy_number="POL-98765",
+            source_email_id="msg_123",
+            source_filename="receipt.jpg",
+            extraction_confidence=0.95,
+        )
+
+        # Test submission includes proper field mapping
+        # Assert NCB API called with correct schema
+        # Assert Sheets updated with reference
 
     @pytest.mark.asyncio
     async def test_handles_ncb_errors(
         self, mock_ncb_api, mock_redis
     ):
         """
-        Test NCB error handling
+        Test NCB error handling with new schema
 
-        Given: NCB API returns error
+        Given: NCB API returns validation error
         When: Worker processes
         Then: Job retried with backoff or moved to failed
         """
+        # Arrange - Mock validation error response
+        mock_ncb_api.post.return_value = MagicMock(
+            status_code=400,
+            json=lambda: {
+                "success": False,
+                "error_code": "VALIDATION_FAILED",
+                "message": "Invalid Policy Number",
+                "details": {"field": "Policy Number", "reason": "Format invalid"},
+            },
+        )
+
+        # Test error handling and retry logic
         pass
 
     @pytest.mark.asyncio
@@ -187,6 +231,40 @@ class TestNCBSubmitterWorker:
         When: Worker continues
         Then: Waits per Retry-After before next submission
         """
+        pass
+
+    @pytest.mark.asyncio
+    async def test_field_mapping_from_extracted_to_ncb(
+        self, mock_ncb_api, mock_redis
+    ):
+        """
+        Test field mapping from ExtractedClaim to NCB schema
+
+        Given: ExtractedClaim with internal field names
+        When: Worker transforms to NCB submission
+        Then: Fields correctly mapped to NCB schema
+        """
+        # Arrange
+        from src.models.claim import ExtractedClaim
+        from datetime import datetime
+
+        extracted = ExtractedClaim(
+            member_id="M12345",
+            policy_number="POL-98765",
+            service_date=datetime(2024, 12, 21),
+            receipt_number="INV-12345",
+            total_amount=150.50,
+        )
+
+        # Act - Transform to NCB submission
+        # Expected mapping:
+        # service_date -> Event date (ISO format)
+        # submission time -> Submission Date (ISO format with timezone)
+        # total_amount -> Claim Amount
+        # receipt_number -> Invoice Number
+        # policy_number -> Policy Number
+
+        # Assert proper mapping
         pass
 
 

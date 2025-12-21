@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Redis - Job Queue and Caching
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: claims-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --appendfsync everysec
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - claims-network
+
+  # =============================================================================
+  # Claims Data Entry Agent - Main Application (GPU-enabled)
+  # =============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: claims-app
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      # Application
+      - APP_ENV=development
+      - APP_DEBUG=true
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=console
+
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+
+      # OCR (GPU enabled in development)
+      - OCR_USE_GPU=true
+      - OCR_DEFAULT_LANGUAGE=en
+      - OCR_DETECTION_THRESHOLD=0.5
+      - OCR_RECOGNITION_THRESHOLD=0.5
+      - OCR_HIGH_CONFIDENCE_THRESHOLD=0.90
+      - OCR_MEDIUM_CONFIDENCE_THRESHOLD=0.75
+      - OCR_BATCH_SIZE=6
+      - OCR_MAX_IMAGE_SIZE=4096
+
+      # Storage
+      - TEMP_STORAGE_PATH=/app/data/temp
+      - TEMP_FILE_MAX_AGE_HOURS=24
+
+      # Admin
+      - ADMIN_PORT=8080
+      - ADMIN_CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+    env_file:
+      - .env
+    volumes:
+      # Source code (for development hot reload)
+      - ./src:/app/src:ro
+
+      # Secrets (read-only for security)
+      - ./secrets:/app/secrets:ro
+
+      # Data persistence
+      - app-data:/app/data
+      - app-logs:/app/logs
+
+      # Development: Install pre-commit hooks
+      - ./.git:/app/.git:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - claims-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health', timeout=5.0)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+
+  # =============================================================================
+  # CPU-only variant (uncomment to use instead of GPU version)
+  # =============================================================================
+  # app-cpu:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     target: cpu-only
+  #   container_name: claims-app-cpu
+  #   restart: unless-stopped
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8080:8080"
+  #     - "9090:9090"
+  #   environment:
+  #     - APP_ENV=development
+  #     - APP_DEBUG=true
+  #     - LOG_LEVEL=INFO
+  #     - LOG_FORMAT=console
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - OCR_USE_GPU=false
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./src:/app/src:ro
+  #     - ./secrets:/app/secrets:ro
+  #     - app-data:/app/data
+  #     - app-logs:/app/logs
+  #   networks:
+  #     - claims-network
+
+networks:
+  claims-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  app-data:
+    driver: local
+  app-logs:
+    driver: local

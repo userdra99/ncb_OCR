@@ -112,11 +112,21 @@ class OCRService:
         claim = ExtractedClaim(raw_text=full_text)
         field_scores = {}
 
-        # Extract member ID
+        # Extract member ID and policy number
         member_id = self._extract_member_id(full_text, ocr_result.text_blocks)
         if member_id:
             claim.member_id = member_id
             field_scores["member_id"] = calculate_field_confidence(member_id, avg_confidence)
+
+        # Extract policy number (may be same as member_id or separate)
+        policy_number = self._extract_policy_number(full_text, ocr_result.text_blocks)
+        if policy_number:
+            claim.policy_number = policy_number
+            field_scores["policy_number"] = calculate_field_confidence(policy_number, avg_confidence)
+        elif member_id:
+            # Fallback: use member_id as policy_number if not found separately
+            claim.policy_number = member_id
+            field_scores["policy_number"] = field_scores.get("member_id", avg_confidence)
 
         # Extract provider name
         provider = self._extract_provider_name(full_text, ocr_result.text_blocks)
@@ -230,11 +240,25 @@ class OCRService:
         return None
 
     def _extract_receipt_number(self, text: str, blocks: list[dict]) -> Optional[str]:
-        """Extract receipt number from text."""
+        """Extract receipt/invoice number from text."""
         patterns = [
             r"Receipt\s*No[:\s]+([A-Z0-9-]+)",
             r"Invoice\s*No[:\s]+([A-Z0-9-]+)",
+            r"Invoice\s*Number[:\s]+([A-Z0-9-]+)",
             r"Ref[:\s]+([A-Z0-9-]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    def _extract_policy_number(self, text: str, blocks: list[dict]) -> Optional[str]:
+        """Extract policy number from text."""
+        patterns = [
+            r"Policy\s*No[:\s]+([A-Z0-9]+)",
+            r"Policy\s*Number[:\s]+([A-Z0-9]+)",
+            r"Member\s*Policy[:\s]+([A-Z0-9]+)",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)

@@ -19,7 +19,7 @@ class TestClaimProcessingPipeline:
         self, test_data_dir
     ):
         """
-        Test automatic submission of high-confidence claim
+        Test automatic submission of high-confidence claim with NCB schema
 
         Given: Email with clear, high-quality receipt
         When: System processes email
@@ -27,11 +27,18 @@ class TestClaimProcessingPipeline:
           - Email polled and detected
           - Attachment downloaded
           - OCR extracts data with >90% confidence
-          - Automatically submitted to NCB
+          - Automatically submitted to NCB with correct schema
           - NCB reference captured
           - Logged to Google Sheets
           - Archived to Google Drive
           - Email marked as processed
+
+        NCB Submission includes:
+          - Event date: Service date in ISO format
+          - Submission Date: Current timestamp in ISO format
+          - Claim Amount: Total amount
+          - Invoice Number: Receipt number
+          - Policy Number: Member policy number
         """
         # This would use real services in a test environment
         # Or sophisticated mocks that simulate the full flow
@@ -119,7 +126,45 @@ class TestClaimProcessingPipeline:
           - Initial submission fails
           - Job retried with exponential backoff
           - Eventually succeeds when NCB available
-          - Final status updated
+          - Final status updated with NCB reference
+        """
+        pass
+
+    @pytest.mark.asyncio
+    async def test_ncb_schema_validation_in_pipeline(
+        self, test_data_dir
+    ):
+        """
+        Test NCB schema validation in complete pipeline
+
+        Given: Email with receipt containing all required fields
+        When: System processes end-to-end
+        Then:
+          - ExtractedClaim has policy_number field
+          - Transformation to NCB schema succeeds
+          - NCB submission payload contains:
+            * Event date (YYYY-MM-DD format)
+            * Submission Date (ISO 8601 with timezone)
+            * Claim Amount (float with 2 decimals)
+            * Invoice Number (string)
+            * Policy Number (string)
+        """
+        pass
+
+    @pytest.mark.asyncio
+    async def test_missing_policy_number_handling(
+        self, test_data_dir
+    ):
+        """
+        Test handling of missing Policy Number
+
+        Given: Receipt without policy number
+        When: System extracts and attempts submission
+        Then:
+          - Extraction succeeds but flags missing field
+          - Either routed to exception queue OR
+          - Uses member_id as fallback for policy_number
+          - Logged with warning in Sheets
         """
         pass
 

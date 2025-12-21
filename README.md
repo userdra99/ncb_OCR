@@ -45,6 +45,8 @@ This agent functions as a **data entry assistant only**—it does not perform cl
 | [docs/TECHNICAL_SPEC.md](./docs/TECHNICAL_SPEC.md) | Technical Architecture |
 | [docs/API_CONTRACTS.md](./docs/API_CONTRACTS.md) | API Specifications |
 | [docs/DEVELOPMENT_TASKS.md](./docs/DEVELOPMENT_TASKS.md) | Development Task Breakdown |
+| [docs/DOCKER.md](./docs/DOCKER.md) | Docker Deployment Guide |
+| [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) | Production Deployment Guide |
 
 ## Quick Start
 
@@ -61,7 +63,7 @@ This agent functions as a **data entry assistant only**—it does not perform cl
 ```bash
 # Clone repository
 git clone <repository-url>
-cd claims-data-entry-agent
+cd ncb_OCR
 
 # Create virtual environment
 python -m venv venv
@@ -74,6 +76,34 @@ pip install -e ".[dev]"
 cp .env.example .env
 # Edit .env with your configuration
 ```
+
+### Docker Quick Start
+
+**Development:**
+```bash
+# Start all services with Docker
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop services
+docker compose down
+```
+
+**Production:**
+```bash
+# Build and start production services
+docker compose -f docker-compose.prod.yml up -d
+
+# Check health
+docker compose -f docker-compose.prod.yml ps
+
+# View logs
+docker compose -f docker-compose.prod.yml logs -f
+```
+
+For complete Docker setup and troubleshooting, see [docs/DOCKER.md](./docs/DOCKER.md).
 
 ### Setup Google APIs
 
@@ -88,24 +118,14 @@ python scripts/init_sheets.py
 ### Development
 
 ```bash
-# Start Redis
-docker-compose up -d redis
+# Start Redis only
+docker compose up -d redis
 
 # Run development server
 python -m src.main
 
 # Run tests
 pytest tests/ -v
-```
-
-### Production
-
-```bash
-# Build and start all services
-docker-compose -f docker-compose.prod.yml up -d
-
-# View logs
-docker-compose -f docker-compose.prod.yml logs -f
 ```
 
 ## Architecture

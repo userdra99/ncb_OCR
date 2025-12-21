@@ -72,13 +72,13 @@ class NCBService:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
                 logger.info(
                     "Submitting claim to NCB",
-                    member_id=claim.member_id,
-                    amount=claim.total_amount,
+                    policy_number=claim.policy_number,
+                    amount=claim.claim_amount,
                 )
 
                 response = await client.post(
                     f"{self.base_url}/claims/submit",
-                    json=claim.model_dump(),
+                    json=claim.model_dump(by_alias=True),  # Use NCB field names
                     headers=self.headers,
                 )
 

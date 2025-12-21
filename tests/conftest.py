@@ -148,7 +148,7 @@ def mock_gmail_service() -> MagicMock:
 
 @pytest.fixture
 def mock_ncb_api() -> AsyncMock:
-    """Return mock NCB API client."""
+    """Return mock NCB API client with NCB schema response."""
     api_mock = AsyncMock()
     api_mock.post.return_value = MagicMock(
         status_code=201,
@@ -157,6 +157,12 @@ def mock_ncb_api() -> AsyncMock:
             "claim_reference": "CLM-2024-567890",
             "status": "received",
             "message": "Claim submitted successfully",
+            # NCB schema fields echo back
+            "Event date": "2024-12-21",
+            "Submission Date": "2024-12-21T10:30:00Z",
+            "Claim Amount": 150.50,
+            "Invoice Number": "INV-12345",
+            "Policy Number": "POL-98765",
         },
     )
     return api_mock

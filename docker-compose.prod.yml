@@ -1,0 +1,245 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Redis - Production Configuration
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: claims-redis-prod
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"  # Only localhost access
+    volumes:
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - claims-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # =============================================================================
+  # Claims Data Entry Agent - Production Configuration
+  # =============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: claims-app-prod
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"  # Only localhost access (use reverse proxy)
+      - "127.0.0.1:9090:9090"  # Metrics endpoint
+    environment:
+      # Application - Production settings
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - LOG_LEVEL=WARNING
+      - LOG_FORMAT=json
+
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_OCR_QUEUE=claims:ocr_queue
+      - REDIS_SUBMISSION_QUEUE=claims:submission_queue
+      - REDIS_EXCEPTION_QUEUE=claims:exception_queue
+
+      # OCR - Production optimized
+      - OCR_USE_GPU=true
+      - OCR_DEFAULT_LANGUAGE=en
+      - OCR_DETECTION_THRESHOLD=0.5
+      - OCR_RECOGNITION_THRESHOLD=0.5
+      - OCR_HIGH_CONFIDENCE_THRESHOLD=0.90
+      - OCR_MEDIUM_CONFIDENCE_THRESHOLD=0.75
+      - OCR_BATCH_SIZE=8
+      - OCR_MAX_IMAGE_SIZE=4096
+
+      # Storage
+      - TEMP_STORAGE_PATH=/app/data/temp
+      - TEMP_FILE_MAX_AGE_HOURS=24
+
+      # Admin
+      - ADMIN_PORT=8080
+
+      # Monitoring
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9090
+    env_file:
+      - .env.production
+    volumes:
+      # Secrets (read-only, mounted from secure location)
+      - /opt/claims-secrets:/app/secrets:ro
+
+      # Data persistence
+      - app-data:/app/data
+      - app-logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - claims-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health', timeout=5.0)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+        compress: "true"
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # Need write access to /app/data and /app/logs
+    tmpfs:
+      - /tmp:mode=1777,size=1G
+
+  # =============================================================================
+  # OCR Worker (Optional - Separate worker for scaling)
+  # =============================================================================
+  ocr-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: claims-ocr-worker
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+      - REDIS_URL=redis://redis:6379/0
+      - OCR_USE_GPU=true
+      - OCR_BATCH_SIZE=8
+    env_file:
+      - .env.production
+    volumes:
+      - /opt/claims-secrets:/app/secrets:ro
+      - app-data:/app/data
+      - app-logs:/app/logs
+    command: ["worker", "ocr"]
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '3'
+          memory: 6G
+        reservations:
+          cpus: '2'
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - claims-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+    security_opt:
+      - no-new-privileges:true
+
+  # =============================================================================
+  # Submission Worker (Optional - Separate worker for NCB submissions)
+  # =============================================================================
+  submission-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: claims-submission-worker
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env.production
+    volumes:
+      - /opt/claims-secrets:/app/secrets:ro
+      - app-data:/app/data
+      - app-logs:/app/logs
+    command: ["worker", "submission"]
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    networks:
+      - claims-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  claims-network:
+    driver: bridge
+    internal: false
+
+volumes:
+  redis-data:
+    driver: local
+  app-data:
+    driver: local
+  app-logs:
+    driver: local
