@@ -1,0 +1,26 @@
+亲爱的理赔部门 Dear Claims Department,
+
+我想提交以下医疗索赔 I would like to submit the following medical claim:
+
+会员号码 Member ID: M44444
+会员姓名 Member Name: 陈美玲 Chen Mei Ling
+医疗机构 Provider: 林牙医诊所 Dr. Lim Dental Clinic
+地址 Address: 88 Jalan Imbi, 55100 Kuala Lumpur
+服务日期 Service Date: 19/12/2024
+收据编号 Receipt Number: LDC-2024-7890
+总金额 Total Amount: RM 1,850.00
+
+项目明细 Itemized Charges:
+- 牙齿检查 Dental Check-up: RM 100.00
+- 牙齿清洁 Teeth Cleaning: RM 150.00
+- 补牙 (2颗) Fillings (2 teeth): RM 600.00
+- X光检查 X-Ray: RM 200.00
+- 根管治疗 Root Canal Treatment: RM 700.00
+- SST消费税 (10%): RM 100.00
+
+总计 Total: RM 1,850.00
+
+附件中有收据扫描件 Scanned receipt attached.
+
+谢谢 Thank you,
+陈美玲 Chen Mei Ling

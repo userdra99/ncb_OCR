@@ -1,0 +1,23 @@
+Kepada Jabatan Tuntutan,
+
+Sila proses tuntutan perubatan seperti berikut:
+
+ID Ahli: M11111
+Nama Ahli: Siti Nurhaliza binti Hassan
+Pembekal: Klinik Kesihatan Prima
+Alamat Pembekal: 123 Jalan Sultan, 50000 Kuala Lumpur
+Tarikh Perkhidmatan: 20-12-2024
+Nombor Resit: KKP-2024-5678
+Jumlah Keseluruhan: RM 1,200.00
+
+Butiran:
+- Pemeriksaan Doktor: RM 80.00
+- Ubat-ubatan: RM 950.00
+- X-Ray: RM 120.00
+- SST (10%): RM 50.00
+
+Jumlah: RM 1,200.00
+
+Terima kasih atas kerjasama anda.
+
+Siti Nurhaliza binti Hassan

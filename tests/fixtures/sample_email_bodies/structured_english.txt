@@ -1,0 +1,25 @@
+Dear Claims Department,
+
+Please find attached the medical receipt for the following claim:
+
+Member ID: M12345
+Member Name: Ahmad bin Abdullah
+Provider: Columbia Asia Hospital Petaling Jaya
+Provider Address: No. 2, Jalan Damansara, 46050 Petaling Jaya, Selangor
+Service Date: 15/12/2024
+Receipt Number: CAH-2024-12-8765
+Total Amount: RM 2,450.50
+
+Description:
+- Consultation with Specialist (Cardiology): RM 200.00
+- ECG Test: RM 150.00
+- Blood Test (Lipid Profile): RM 120.00
+- Medication (30 days): RM 1,800.50
+- SST (10%): RM 180.00
+
+Total: RM 2,450.50
+
+Please process this claim at your earliest convenience.
+
+Thank you,
+Ahmad bin Abdullah
