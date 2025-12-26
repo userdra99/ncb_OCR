@@ -1,6 +1,7 @@
 """OCR processor worker for text extraction."""
 
 import asyncio
+import random
 from pathlib import Path
 
 from src.config.settings import settings
@@ -126,45 +127,93 @@ class OCRProcessorWorker:
             except Exception as e:
                 logger.error("Failed to archive to Drive", job_id=job.id, error=str(e))
 
-            # Route based on confidence
+            # Route based on confidence and QA sampling
             confidence = extraction_result.confidence_score
 
-            if confidence >= settings.ocr.high_confidence_threshold:
-                # High confidence - queue for NCB submission
-                logger.info(
-                    "High confidence extraction, queuing for submission",
-                    job_id=job.id,
-                    confidence=confidence,
-                )
-                # Re-enqueue to submission queue
-                job = await self.queue_service.get_job(job.id)
-                await self.queue_service.enqueue_job(
-                    job, queue_name=settings.redis.submission_queue
-                )
+            # Check if job should be routed to exception queue
+            should_route_to_exception = False
+            exception_reason = None
+            needs_review = False
 
-            elif confidence >= settings.ocr.medium_confidence_threshold:
-                # Medium confidence - submit with review flag
-                logger.info(
-                    "Medium confidence extraction, queuing for submission with review",
-                    job_id=job.id,
-                    confidence=confidence,
-                )
-                job = await self.queue_service.get_job(job.id)
-                await self.queue_service.enqueue_job(
-                    job, queue_name=settings.redis.submission_queue
-                )
-
-            else:
+            # Check confidence thresholds
+            if confidence < settings.ocr.medium_confidence_threshold:
                 # Low confidence - route to exception queue
+                should_route_to_exception = True
+                exception_reason = f"Low confidence: {confidence:.2%}"
                 logger.warning(
                     "Low confidence extraction, routing to exception queue",
                     job_id=job.id,
                     confidence=confidence,
+                    threshold=settings.ocr.medium_confidence_threshold,
                 )
+
+            elif confidence < settings.ocr.high_confidence_threshold:
+                # Medium confidence - mark for review but proceed
+                needs_review = True
+                logger.info(
+                    "Medium confidence extraction, marking for review",
+                    job_id=job.id,
+                    confidence=confidence,
+                    medium_threshold=settings.ocr.medium_confidence_threshold,
+                    high_threshold=settings.ocr.high_confidence_threshold,
+                )
+
+            else:
+                # High confidence - check for QA random sampling
+                qa_sample_rate = settings.ocr.qa_sampling_percentage
+                if random.random() < qa_sample_rate:
+                    needs_review = True
+                    exception_reason = f"QA random sampling ({qa_sample_rate:.1%} rate)"
+                    logger.info(
+                        "High confidence extraction selected for QA sampling",
+                        job_id=job.id,
+                        confidence=confidence,
+                        qa_sample_rate=qa_sample_rate,
+                    )
+
+            # Get fresh job data
+            job = await self.queue_service.get_job(job.id)
+
+            if should_route_to_exception:
+                # Route to exception queue
                 await self.queue_service.update_job_status(
                     job.id,
                     JobStatus.EXCEPTION,
-                    error_message=f"Low confidence: {confidence:.2f}",
+                    exception_reason=exception_reason,
+                    needs_review=True,
+                )
+                logger.info(
+                    "Job routed to exception queue",
+                    job_id=job.id,
+                    reason=exception_reason,
+                )
+
+            else:
+                # Proceed to NCB submission queue
+                if needs_review:
+                    await self.queue_service.update_job_status(
+                        job.id,
+                        JobStatus.EXTRACTED,
+                        needs_review=True,
+                        exception_reason=exception_reason,
+                    )
+                    logger.info(
+                        "Job queued for submission with review flag",
+                        job_id=job.id,
+                        confidence=confidence,
+                        review_reason=exception_reason or "Medium confidence",
+                    )
+                else:
+                    logger.info(
+                        "High confidence extraction, queuing for automatic submission",
+                        job_id=job.id,
+                        confidence=confidence,
+                    )
+
+                # Re-fetch job with updated metadata
+                job = await self.queue_service.get_job(job.id)
+                await self.queue_service.enqueue_job(
+                    job, queue_name=settings.redis.submission_queue
                 )
 
             # Cleanup temp file

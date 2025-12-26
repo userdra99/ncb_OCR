@@ -10,12 +10,31 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AppConfig(BaseSettings):
     """Application configuration."""
 
-    env: Literal["development", "production"] = Field(default="development", alias="APP_ENV")
+    model_config = SettingsConfigDict(extra="ignore")
+
+    env: Literal["development", "production", "testing"] = Field(default="development", alias="APP_ENV")
     debug: bool = Field(default=False, alias="APP_DEBUG")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO", alias="LOG_LEVEL"
     )
     log_format: Literal["json", "console"] = Field(default="json", alias="LOG_FORMAT")
+
+
+class GoogleCloudConfig(BaseSettings):
+    """Google Cloud configuration for Pub/Sub."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    project_id: str = Field(alias="GOOGLE_CLOUD_PROJECT_ID")
+    credentials_path: Path | None = Field(default=None, alias="GOOGLE_CLOUD_CREDENTIALS_PATH")
+
+    @field_validator("credentials_path", mode="before")
+    @classmethod
+    def validate_path(cls, v: str | Path | None) -> Path | None:
+        """Convert string to Path."""
+        if v is None or v == "":
+            return None
+        return Path(v) if isinstance(v, str) else v
 
 
 class GmailConfig(BaseSettings):
@@ -27,6 +46,10 @@ class GmailConfig(BaseSettings):
     processed_label: str = Field(default="Claims/Processed", alias="GMAIL_PROCESSED_LABEL")
     poll_interval_seconds: int = Field(default=30, alias="GMAIL_POLL_INTERVAL")
     max_attachment_size_mb: int = Field(default=25, alias="GMAIL_MAX_ATTACHMENT_SIZE_MB")
+
+    # Pub/Sub configuration (for Gmail watch notifications)
+    pubsub_topic_name: str = Field(default="gmail-notifications", alias="GMAIL_PUBSUB_TOPIC")
+    pubsub_subscription_name: str = Field(default="gmail-notifications-sub", alias="GMAIL_PUBSUB_SUBSCRIPTION")
 
     @field_validator("credentials_path", "token_path", mode="before")
     @classmethod
@@ -88,6 +111,8 @@ class RedisConfig(BaseSettings):
 class OCRConfig(BaseSettings):
     """OCR configuration."""
 
+    model_config = SettingsConfigDict(extra="ignore")
+
     use_gpu: bool = Field(default=True, alias="OCR_USE_GPU")
     default_language: str = Field(default="en", alias="OCR_DEFAULT_LANGUAGE")
     supported_languages: list[str] = Field(
@@ -103,10 +128,23 @@ class OCRConfig(BaseSettings):
     )
     batch_size: int = Field(default=6, alias="OCR_BATCH_SIZE")
     max_image_size: int = Field(default=4096, alias="OCR_MAX_IMAGE_SIZE")
+    qa_sampling_percentage: float = Field(
+        default=0.05, alias="OCR_QA_SAMPLING_PERCENTAGE"
+    )  # 5% random sampling for QA
+
+    @field_validator("supported_languages", mode="before")
+    @classmethod
+    def parse_languages(cls, v: str | list[str]) -> list[str]:
+        """Parse comma-separated string or list."""
+        if isinstance(v, str):
+            return [lang.strip() for lang in v.split(",") if lang.strip()]
+        return v
 
 
 class AdminConfig(BaseSettings):
     """Admin dashboard configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
 
     api_key: SecretStr = Field(alias="ADMIN_API_KEY")
     port: int = Field(default=8080, alias="ADMIN_PORT")
@@ -126,6 +164,8 @@ class AdminConfig(BaseSettings):
 
 class AlertsConfig(BaseSettings):
     """Alerts configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
 
     enabled: bool = Field(default=True, alias="ALERTS_ENABLED")
     smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
@@ -170,6 +210,7 @@ class Settings(BaseSettings):
     )
 
     app: AppConfig = Field(default_factory=AppConfig)
+    google_cloud: GoogleCloudConfig = Field(default_factory=GoogleCloudConfig)
     gmail: GmailConfig = Field(default_factory=GmailConfig)
     ncb: NCBConfig = Field(default_factory=NCBConfig)
     sheets: SheetsConfig = Field(default_factory=SheetsConfig)

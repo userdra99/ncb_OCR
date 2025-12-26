@@ -1,5 +1,6 @@
 """Google Sheets service for audit logging."""
 
+import asyncio
 import datetime
 from typing import Optional
 
@@ -42,7 +43,7 @@ class SheetsService:
         """
         try:
             # Get current sheet (or create monthly sheet)
-            sheet = self._get_or_create_current_sheet()
+            sheet = await asyncio.to_thread(self._get_or_create_current_sheet)
 
             # Prepare row data
             row = [
@@ -58,13 +59,18 @@ class SheetsService:
                 job.ncb_reference or "",  # NCB reference
                 job.ncb_submitted_at.isoformat() if job.ncb_submitted_at else "",  # NCB submit time
                 job.error_message or "",  # Error message
+                "YES" if job.needs_review else "NO",  # Needs review flag
+                job.exception_reason or "",  # Exception reason
             ]
 
-            # Append row
-            sheet.append_row(row, value_input_option="USER_ENTERED")
+            # Append row (non-blocking)
+            await asyncio.to_thread(
+                lambda: sheet.append_row(row, value_input_option="USER_ENTERED")
+            )
 
-            # Get row number
-            row_num = len(sheet.get_all_values())
+            # Get row number (non-blocking)
+            all_values = await asyncio.to_thread(sheet.get_all_values)
+            row_num = len(all_values)
             row_ref = f"{sheet.title}!A{row_num}"
 
             logger.info("Extraction logged to Sheets", job_id=job.id, row_ref=row_ref)
@@ -90,12 +96,18 @@ class SheetsService:
             sheet_name, cell = row_ref.split("!")
             row_num = int(cell[1:])
 
-            sheet = self.spreadsheet.worksheet(sheet_name)
+            # Get worksheet (non-blocking)
+            sheet = await asyncio.to_thread(
+                lambda: self.spreadsheet.worksheet(sheet_name)
+            )
 
-            # Update columns J (NCB reference) and I (status)
-            sheet.update(f"I{row_num}", [[status]])
-            sheet.update(f"J{row_num}", [[ncb_reference]])
-            sheet.update(f"K{row_num}", [[datetime.datetime.now().isoformat()]])
+            # Update columns J (NCB reference) and I (status) in parallel
+            timestamp = datetime.datetime.now().isoformat()
+            await asyncio.gather(
+                asyncio.to_thread(lambda: sheet.update(f"I{row_num}", [[status]])),
+                asyncio.to_thread(lambda: sheet.update(f"J{row_num}", [[ncb_reference]])),
+                asyncio.to_thread(lambda: sheet.update(f"K{row_num}", [[timestamp]])),
+            )
 
             logger.info(
                 "NCB status updated in Sheets",
@@ -118,8 +130,9 @@ class SheetsService:
             Summary statistics
         """
         try:
-            sheet = self._get_or_create_current_sheet()
-            all_values = sheet.get_all_values()
+            # Get sheet and values (non-blocking)
+            sheet = await asyncio.to_thread(self._get_or_create_current_sheet)
+            all_values = await asyncio.to_thread(sheet.get_all_values)
 
             # Filter by date
             date_str = date.isoformat()
@@ -146,7 +159,12 @@ class SheetsService:
             return {}
 
     def _get_or_create_current_sheet(self):
-        """Get or create sheet for current month."""
+        """
+        Get or create sheet for current month.
+
+        Note: This method is synchronous and should be called via asyncio.to_thread()
+        from async contexts to avoid blocking the event loop.
+        """
         # Monthly sheet naming: "Claims_2024_12"
         sheet_name = f"Claims_{datetime.datetime.now().strftime('%Y_%m')}"
 
@@ -155,7 +173,7 @@ class SheetsService:
         except gspread.WorksheetNotFound:
             # Create new sheet
             sheet = self.spreadsheet.add_worksheet(
-                title=sheet_name, rows=1000, cols=12
+                title=sheet_name, rows=1000, cols=14
             )
 
             # Add header row
@@ -172,6 +190,8 @@ class SheetsService:
                 "NCB Reference",
                 "NCB Submitted",
                 "Error",
+                "Needs Review",
+                "Exception Reason",
             ]
             sheet.append_row(header)
 

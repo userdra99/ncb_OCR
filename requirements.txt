@@ -11,23 +11,27 @@ rq>=1.15.0
 
 # OCR
 paddlepaddle-gpu>=2.5.0
-paddleocr>=2.7.0
+numpy<2.0,>=1.23.0
+paddleocr==2.7.3
 
 # Google APIs
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.1.0
 google-auth-oauthlib>=1.1.0
+google-cloud-pubsub>=2.18.0
 gspread>=5.12.0
 
 # Image Processing
 Pillow>=10.0.0
 pdf2image>=1.16.0
-opencv-python>=4.8.0
+opencv-python<=4.6.0.66
 
 # Utilities
 httpx>=0.25.0
 structlog>=23.2.0
 tenacity>=8.2.0
+aiofiles>=23.2.0
+slowapi>=0.1.9
 
 # Testing
 pytest>=7.4.0

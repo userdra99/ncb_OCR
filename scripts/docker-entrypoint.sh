@@ -192,11 +192,12 @@ main() {
     case "$CMD" in
         app)
             log_info "Starting FastAPI application..."
+            # Convert LOG_LEVEL to lowercase for uvicorn
+            UVICORN_LOG_LEVEL=$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')
             exec uvicorn src.main:app \
                 --host 0.0.0.0 \
                 --port "${ADMIN_PORT:-8080}" \
-                --workers 1 \
-                --log-level "${LOG_LEVEL:-info}" \
+                --log-level "$UVICORN_LOG_LEVEL" \
                 --proxy-headers \
                 --forwarded-allow-ips='*'
             ;;
@@ -206,13 +207,13 @@ main() {
             log_info "Starting worker: $WORKER_TYPE"
 
             if [ "$WORKER_TYPE" = "ocr" ]; then
-                exec python -m src.workers.ocr_worker
+                exec python -m src.workers.ocr_processor
             elif [ "$WORKER_TYPE" = "submission" ]; then
-                exec python -m src.workers.submission_worker
+                exec python -m src.workers.ncb_submitter
             else
                 # Start all workers
                 log_info "Starting all workers in background..."
-                python -m src.workers.ocr_worker &
+                python -m src.workers.ocr_processor &
                 WORKER_PID=$!
 
                 # Keep container running

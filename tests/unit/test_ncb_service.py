@@ -672,3 +672,277 @@ class TestNCBService:
         # Unit test verifies retry configuration exists
         # Config values depend on implementation
         pass
+
+
+@pytest.mark.unit
+@pytest.mark.ncb
+@pytest.mark.circuit_breaker
+class TestCircuitBreaker:
+    """Test suite for Circuit Breaker pattern"""
+
+    @pytest.fixture
+    def ncb_service(self, mock_env):
+        """Create NCB service with circuit breaker."""
+        from src.services.ncb_service import NCBService
+
+        # Create service with low thresholds for testing
+        return NCBService(failure_threshold=3, circuit_timeout=2)
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_opens_after_failures(self, ncb_service):
+        """
+        Test circuit breaker opens after threshold failures
+
+        Given: Circuit breaker with threshold of 3
+        When: 3 consecutive failures occur
+        Then: Circuit breaker opens and rejects subsequent calls
+        """
+        from src.models.claim import NCBSubmissionRequest
+        from src.services.ncb_service import NCBConnectionError
+
+        request = NCBSubmissionRequest(
+            event_date="2024-12-15",
+            submission_date="2024-12-21T10:00:00",
+            claim_amount=100.00,
+            invoice_number="RCP-001",
+            policy_number="M12345",
+            source_email_id="msg_123",
+            source_filename="test.jpg",
+            extraction_confidence=0.95,
+        )
+
+        # Mock failures
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_client.return_value.__aenter__.return_value.post.side_effect = \
+                httpx.ConnectError("Connection failed")
+
+            # First 3 attempts should fail and open circuit
+            for i in range(3):
+                try:
+                    await ncb_service.submit_claim(request)
+                except NCBConnectionError:
+                    pass  # Expected
+
+            # Circuit should now be open
+            assert ncb_service.circuit_breaker.state.value == "open"
+
+            # Next attempt should be rejected by circuit breaker
+            response = await ncb_service.submit_claim(request)
+            assert response.success is False
+            assert response.error_code == "CIRCUIT_OPEN"
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_does_not_count_validation_errors(self, ncb_service):
+        """
+        Test validation errors don't count towards circuit breaker
+
+        Given: Circuit breaker with threshold of 3
+        When: Multiple 400 validation errors occur
+        Then: Circuit breaker remains closed
+        """
+        from src.models.claim import NCBSubmissionRequest
+        from src.services.ncb_service import NCBValidationError
+
+        request = NCBSubmissionRequest(
+            event_date="2024-12-15",
+            submission_date="2024-12-21T10:00:00",
+            claim_amount=100.00,
+            invoice_number="RCP-001",
+            policy_number="INVALID",
+            source_email_id="msg_123",
+            source_filename="test.jpg",
+            extraction_confidence=0.95,
+        )
+
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_client.return_value.__aenter__.return_value.post.return_value = MagicMock(
+                status_code=400,
+                json=lambda: {"message": "Invalid member ID"}
+            )
+
+            # Multiple validation errors
+            for i in range(5):
+                try:
+                    await ncb_service.submit_claim(request)
+                except NCBValidationError:
+                    pass  # Expected
+
+            # Circuit should still be closed
+            assert ncb_service.circuit_breaker.state.value == "closed"
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_half_open_recovery(self, ncb_service):
+        """
+        Test circuit breaker transitions to half-open after timeout
+
+        Given: Circuit breaker is open
+        When: Timeout period elapses
+        Then: Circuit transitions to half-open for testing
+        """
+        import asyncio
+        from src.models.claim import NCBSubmissionRequest
+
+        request = NCBSubmissionRequest(
+            event_date="2024-12-15",
+            submission_date="2024-12-21T10:00:00",
+            claim_amount=100.00,
+            invoice_number="RCP-001",
+            policy_number="M12345",
+            source_email_id="msg_123",
+            source_filename="test.jpg",
+            extraction_confidence=0.95,
+        )
+
+        # Force circuit open
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_client.return_value.__aenter__.return_value.post.side_effect = \
+                httpx.ConnectError("Connection failed")
+
+            for i in range(3):
+                try:
+                    await ncb_service.submit_claim(request)
+                except:
+                    pass
+
+            assert ncb_service.circuit_breaker.state.value == "open"
+
+            # Wait for timeout (2 seconds in test config)
+            await asyncio.sleep(2.1)
+
+            # Mock success for recovery
+            mock_client.return_value.__aenter__.return_value.post.side_effect = None
+            mock_client.return_value.__aenter__.return_value.post.return_value = MagicMock(
+                status_code=201,
+                json=lambda: {"success": True, "claim_reference": "CLM-123"}
+            )
+
+            # Check circuit breaker allows call (transitions to half-open)
+            response = await ncb_service.submit_claim(request)
+
+            # Should succeed and close circuit
+            assert response.success is True
+            assert ncb_service.circuit_breaker.state.value == "closed"
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_counts_rate_limit_errors(self, ncb_service):
+        """
+        Test rate limit errors count towards circuit breaker
+
+        Given: Circuit breaker with threshold of 3
+        When: Rate limit errors occur
+        Then: Circuit opens after threshold
+        """
+        from src.models.claim import NCBSubmissionRequest
+        from src.services.ncb_service import NCBRateLimitError
+
+        request = NCBSubmissionRequest(
+            event_date="2024-12-15",
+            submission_date="2024-12-21T10:00:00",
+            claim_amount=100.00,
+            invoice_number="RCP-001",
+            policy_number="M12345",
+            source_email_id="msg_123",
+            source_filename="test.jpg",
+            extraction_confidence=0.95,
+        )
+
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_client.return_value.__aenter__.return_value.post.return_value = MagicMock(
+                status_code=429,
+                headers={"Retry-After": "60"},
+                json=lambda: {"message": "Too many requests"}
+            )
+
+            for i in range(3):
+                try:
+                    await ncb_service.submit_claim(request)
+                except NCBRateLimitError:
+                    pass
+
+            # Circuit should be open
+            assert ncb_service.circuit_breaker.state.value == "open"
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_resets_on_success(self, ncb_service):
+        """
+        Test circuit breaker resets failure count on success
+
+        Given: Circuit with some failures
+        When: Successful call occurs
+        Then: Failure count resets to zero
+        """
+        from src.models.claim import NCBSubmissionRequest
+
+        request = NCBSubmissionRequest(
+            event_date="2024-12-15",
+            submission_date="2024-12-21T10:00:00",
+            claim_amount=100.00,
+            invoice_number="RCP-001",
+            policy_number="M12345",
+            source_email_id="msg_123",
+            source_filename="test.jpg",
+            extraction_confidence=0.95,
+        )
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # 2 failures
+            mock_client.return_value.__aenter__.return_value.post.side_effect = [
+                httpx.ConnectError("Failed"),
+                httpx.ConnectError("Failed"),
+                MagicMock(
+                    status_code=201,
+                    json=lambda: {"success": True, "claim_reference": "CLM-123"}
+                )
+            ]
+
+            # First two fail
+            for i in range(2):
+                try:
+                    await ncb_service.submit_claim(request)
+                except:
+                    pass
+
+            # Third succeeds
+            response = await ncb_service.submit_claim(request)
+            assert response.success is True
+
+            # Failure count should be reset
+            status = ncb_service.get_circuit_breaker_status()
+            assert status["failure_count"] == 0
+            assert status["state"] == "closed"
+
+    @pytest.mark.asyncio
+    async def test_get_circuit_breaker_status(self, ncb_service):
+        """
+        Test getting circuit breaker status
+
+        Given: Circuit breaker with state
+        When: get_circuit_breaker_status() called
+        Then: Returns state and metrics
+        """
+        status = ncb_service.get_circuit_breaker_status()
+
+        assert "state" in status
+        assert "failure_count" in status
+        assert "failure_threshold" in status
+        assert "timeout_seconds" in status
+        assert status["state"] == "closed"
+        assert status["failure_threshold"] == 3
+
+    @pytest.mark.asyncio
+    async def test_health_check_with_open_circuit(self, ncb_service):
+        """
+        Test health check fails when circuit is open
+
+        Given: Circuit breaker is open
+        When: check_health() called
+        Then: Returns False immediately
+        """
+        from src.services.ncb_service import CircuitState
+
+        # Force circuit open
+        ncb_service.circuit_breaker._state = CircuitState.OPEN
+
+        # Health check should fail without making request
+        is_healthy = await ncb_service.check_health()
+        assert is_healthy is False

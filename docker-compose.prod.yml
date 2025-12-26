@@ -1,47 +1,47 @@
-version: '3.8'
-
 services:
   # =============================================================================
-  # Redis - Production Configuration
+  # Redis - Using Host Redis (port 6379 already in use)
   # =============================================================================
-  redis:
-    image: redis:7-alpine
-    container_name: claims-redis-prod
-    restart: always
-    ports:
-      - "127.0.0.1:6379:6379"  # Only localhost access
-    volumes:
-      - redis-data:/data
-    command: >
-      redis-server
-      --appendonly yes
-      --appendfsync everysec
-      --maxmemory 2gb
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - claims-network
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # Commented out - using host Redis at localhost:6379 instead
+  # To use containerized Redis, uncomment this and change port to 6380
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: claims-redis-prod
+  #   restart: always
+  #   ports:
+  #     - "127.0.0.1:6380:6379"  # Changed to 6380 to avoid conflict
+  #   volumes:
+  #     - redis-data:/data
+  #   command: >
+  #     redis-server
+  #     --appendonly yes
+  #     --appendfsync everysec
+  #     --maxmemory 2gb
+  #     --maxmemory-policy allkeys-lru
+  #     --save 900 1
+  #     --save 300 10
+  #     --save 60 10000
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+  #   networks:
+  #     - claims-network
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '2'
+  #         memory: 2G
+  #       reservations:
+  #         cpus: '1'
+  #         memory: 1G
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
 
   # =============================================================================
   # Claims Data Entry Agent - Production Configuration
@@ -53,9 +53,10 @@ services:
       target: production
     container_name: claims-app-prod
     restart: always
-    depends_on:
-      redis:
-        condition: service_healthy
+    network_mode: "host"  # Use host network to access host Redis
+    # depends_on:
+    #   redis:
+    #     condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"  # Only localhost access (use reverse proxy)
       - "127.0.0.1:9090:9090"  # Metrics endpoint
@@ -66,8 +67,8 @@ services:
       - LOG_LEVEL=WARNING
       - LOG_FORMAT=json
 
-      # Redis
-      - REDIS_URL=redis://redis:6379/0
+      # Redis - Using host Redis
+      - REDIS_URL=redis://localhost:6379/0
       - REDIS_OCR_QUEUE=claims:ocr_queue
       - REDIS_SUBMISSION_QUEUE=claims:submission_queue
       - REDIS_EXCEPTION_QUEUE=claims:exception_queue
@@ -91,6 +92,9 @@ services:
       - TEMP_STORAGE_PATH=/app/data/temp
       - TEMP_FILE_MAX_AGE_HOURS=24
 
+      # NCB JSON Output (Production Mode - No API submission)
+      - NCB_JSON_OUTPUT_DIR=/app/data/ncb_pending
+
       # Admin
       - ADMIN_PORT=8080
 
@@ -100,12 +104,17 @@ services:
     env_file:
       - .env.production
     volumes:
-      # Secrets (read-only, mounted from secure location)
-      - /opt/claims-secrets:/app/secrets:ro
+      # Secrets (writable for OAuth token refresh)
+      - ./secrets:/app/secrets
 
       # Data persistence
       - app-data:/app/data
       - app-logs:/app/logs
+
+      # NCB JSON output (for manual submission - NCB API not ready)
+      - ./data/ncb_pending:/app/data/ncb_pending
+      - ./data/ncb_processed:/app/data/ncb_processed
+      - ./data/ncb_output:/app/data/ncb_output
     deploy:
       resources:
         limits:
@@ -119,8 +128,8 @@ services:
               count: ${GPU_COUNT:-1}
               capabilities: [gpu]
     shm_size: ${SHM_SIZE:-16gb}
-    networks:
-      - claims-network
+    # networks:
+    #   - claims-network  # Disabled - using host network mode
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health', timeout=5.0)"]
       interval: 30s
@@ -147,17 +156,17 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: claims-ocr-worker
     restart: always
-    depends_on:
-      redis:
-        condition: service_healthy
+    network_mode: "host"  # Use host network to access host Redis
+    # depends_on:
+    #   redis:
+    #     condition: service_healthy
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://localhost:6379/0
       - OCR_USE_GPU=true
       - OCR_BATCH_SIZE=8
       # GPU Configuration
@@ -167,7 +176,7 @@ services:
     env_file:
       - .env.production
     volumes:
-      - /opt/claims-secrets:/app/secrets:ro
+      - ./secrets:/app/secrets
       - app-data:/app/data
       - app-logs:/app/logs
     command: ["worker", "ocr"]
@@ -185,8 +194,8 @@ services:
               count: ${GPU_COUNT:-1}
               capabilities: [gpu]
     shm_size: ${SHM_SIZE:-16gb}
-    networks:
-      - claims-network
+    # networks:
+    #   - claims-network  # Disabled - using host network mode
     logging:
       driver: "json-file"
       options:
@@ -204,21 +213,21 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: claims-submission-worker
     restart: always
-    depends_on:
-      redis:
-        condition: service_healthy
+    network_mode: "host"  # Use host network to access host Redis
+    # depends_on:
+    #   redis:
+    #     condition: service_healthy
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://localhost:6379/0
     env_file:
       - .env.production
     volumes:
-      - /opt/claims-secrets:/app/secrets:ro
+      - ./secrets:/app/secrets
       - app-data:/app/data
       - app-logs:/app/logs
     command: ["worker", "submission"]
@@ -231,8 +240,8 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
-    networks:
-      - claims-network
+    # networks:
+    #   - claims-network  # Disabled - using host network mode
     logging:
       driver: "json-file"
       options:

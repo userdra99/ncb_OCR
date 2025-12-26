@@ -1,10 +1,10 @@
 # Multi-stage Dockerfile for Claims Data Entry Agent with CUDA support
-# Optimized for both GPU and CPU execution modes
+# Optimized for RTX 5090 Blackwell GPUs with native CUDA 12.9 Blackwell support
 
 # =============================================================================
-# Stage 1: Base image with CUDA runtime
+# Stage 1: Base image with CUDA runtime (CUDA 12.9 with native Blackwell support)
 # =============================================================================
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS base
+FROM nvidia/cuda:12.9.0-cudnn-runtime-ubuntu22.04 AS base
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -62,19 +62,23 @@ RUN python -m pip install --prefix=/install \
     python-dotenv>=1.0.0 \
     redis>=5.0.0 \
     rq>=1.15.0 \
-    paddleocr>=2.7.0 \
+    "numpy<2.0,>=1.23.0" \
+    paddleocr==2.7.3 \
     google-api-python-client>=2.100.0 \
     google-auth-httplib2>=0.1.0 \
     google-auth-oauthlib>=1.1.0 \
+    google-cloud-pubsub>=2.18.0 \
     gspread>=5.12.0 \
     Pillow>=10.0.0 \
     pdf2image>=1.16.0 \
-    opencv-python>=4.8.0 \
+    "opencv-python<=4.6.0.66" \
     httpx>=0.25.0 \
     structlog>=23.2.0 \
     tenacity>=8.2.0 \
     prometheus-client>=0.19.0 \
-    uvloop>=0.19.0
+    uvloop>=0.19.0 \
+    aiofiles>=23.2.0 \
+    slowapi>=0.1.9
 
 # =============================================================================
 # Stage 3: Production runtime image
@@ -86,8 +90,8 @@ LABEL maintainer="TPA Development Team" \
       version="1.0.0" \
       description="Claims Data Entry Agent with OCR and GPU support"
 
-# Create non-root user for security
-RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
+# Create non-root user for security with home directory
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 -m -d /home/appuser appuser
 
 # Set working directory
 WORKDIR /app
@@ -100,7 +104,8 @@ RUN mkdir -p \
     /app/data/temp \
     /app/logs \
     /app/secrets \
-    && chown -R appuser:appuser /app
+    /home/appuser/.paddlex \
+    && chown -R appuser:appuser /app /home/appuser
 
 # Copy application code
 COPY --chown=appuser:appuser src/ /app/src/
@@ -159,8 +164,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -sf /usr/bin/python3.10 /usr/bin/python
 RUN python -m pip install --upgrade pip setuptools wheel
 
-# Create user
-RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
+# Create user with home directory
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 -m -d /home/appuser appuser
 
 WORKDIR /app
 
@@ -178,17 +183,20 @@ RUN python -m pip install \
     google-api-python-client>=2.100.0 \
     google-auth-httplib2>=0.1.0 \
     google-auth-oauthlib>=1.1.0 \
+    google-cloud-pubsub>=2.18.0 \
     gspread>=5.12.0 \
     Pillow>=10.0.0 \
     pdf2image>=1.16.0 \
-    opencv-python>=4.8.0 \
+    "opencv-python<=4.6.0.66" \
     httpx>=0.25.0 \
     structlog>=23.2.0 \
-    tenacity>=8.2.0
+    tenacity>=8.2.0 \
+    aiofiles>=23.2.0 \
+    slowapi>=0.1.9
 
 # Create directories
-RUN mkdir -p /app/data/temp /app/logs /app/secrets \
-    && chown -R appuser:appuser /app
+RUN mkdir -p /app/data/temp /app/logs /app/secrets /home/appuser/.paddlex \
+    && chown -R appuser:appuser /app /home/appuser
 
 # Copy application
 COPY --chown=appuser:appuser src/ /app/src/

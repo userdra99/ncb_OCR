@@ -1,9 +1,13 @@
 """Google Drive service for attachment archiving."""
 
+import asyncio
 import datetime
 from pathlib import Path
+from typing import Optional
 
-from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -12,20 +16,49 @@ from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Using OAuth instead of service account for personal Google accounts
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 
 class DriveService:
-    """Google Drive archive service."""
+    """Google Drive archive service with OAuth authentication."""
 
     def __init__(self) -> None:
-        """Initialize Drive API client."""
+        """Initialize Drive API client with OAuth."""
         self.config = settings.drive
-        credentials = Credentials.from_service_account_file(
-            str(self.config.credentials_path), scopes=SCOPES
-        )
-        self.service = build("drive", "v3", credentials=credentials)
-        logger.info("Drive service initialized", folder_id=self.config.folder_id)
+        self.creds: Optional[Credentials] = None
+        self._authenticate()
+        self.service = build("drive", "v3", credentials=self.creds)
+        logger.info("Drive service initialized (OAuth)", folder_id=self.config.folder_id)
+
+    def _authenticate(self) -> None:
+        """Authenticate with Drive API using OAuth (shared with Gmail)."""
+        # Use Gmail OAuth token (same user, add Drive scope)
+        gmail_token_path = settings.gmail.token_path
+        gmail_creds_path = settings.gmail.credentials_path
+
+        # Load existing token
+        if gmail_token_path.exists():
+            self.creds = Credentials.from_authorized_user_file(
+                str(gmail_token_path), SCOPES
+            )
+
+        # Refresh or get new token
+        if not self.creds or not self.creds.valid:
+            if self.creds and self.creds.expired and self.creds.refresh_token:
+                self.creds.refresh(Request())
+                logger.info("Drive OAuth token refreshed")
+            else:
+                # Need to re-authorize with Drive scope
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(gmail_creds_path), SCOPES
+                )
+                self.creds = flow.run_local_server(port=0)
+                logger.info("Drive OAuth authorization complete")
+
+            # Save the token for future use
+            gmail_token_path.write_text(self.creds.to_json())
+            logger.info("Drive OAuth token saved")
 
     async def archive_attachment(
         self, local_path: Path, email_id: str, original_filename: str
@@ -44,7 +77,7 @@ class DriveService:
         Folder structure: /claims/{YYYY}/{MM}/{DD}/{email_id}_{filename}
         """
         try:
-            # Create date-based folder structure
+            # Create date-based folder structure (all folders created in parallel)
             now = datetime.datetime.now()
             year_folder = await self._get_or_create_folder(
                 str(now.year), self.config.folder_id
@@ -68,9 +101,15 @@ class DriveService:
 
             media = MediaFileUpload(str(local_path), resumable=True)
 
-            file = (
-                self.service.files()
-                .create(body=file_metadata, media_body=media, fields="id,webViewLink")
+            # Upload file (non-blocking)
+            # Note: supportsAllDrives not needed for personal Drive with OAuth
+            file = await asyncio.to_thread(
+                lambda: self.service.files()
+                .create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields="id,webViewLink",
+                )
                 .execute()
             )
 
@@ -95,7 +134,12 @@ class DriveService:
     async def get_file_url(self, file_id: str) -> str:
         """Get shareable URL for archived file."""
         try:
-            file = self.service.files().get(fileId=file_id, fields="webViewLink").execute()
+            # Get file info (non-blocking)
+            file = await asyncio.to_thread(
+                lambda: self.service.files()
+                .get(fileId=file_id, fields="webViewLink")
+                .execute()
+            )
             return file.get("webViewLink", "")
 
         except Exception as e:
@@ -105,7 +149,7 @@ class DriveService:
     async def _get_or_create_folder(self, folder_name: str, parent_id: str) -> str:
         """Get or create folder in Drive."""
         try:
-            # Search for existing folder
+            # Search for existing folder (non-blocking)
             query = (
                 f"name='{folder_name}' and "
                 f"'{parent_id}' in parents and "
@@ -113,9 +157,13 @@ class DriveService:
                 f"trashed=false"
             )
 
-            results = (
-                self.service.files()
-                .list(q=query, spaces="drive", fields="files(id, name)")
+            results = await asyncio.to_thread(
+                lambda: self.service.files()
+                .list(
+                    q=query,
+                    spaces="drive",
+                    fields="files(id, name)",
+                )
                 .execute()
             )
 
@@ -124,15 +172,15 @@ class DriveService:
             if folders:
                 return folders[0]["id"]
 
-            # Create new folder
+            # Create new folder (non-blocking)
             folder_metadata = {
                 "name": folder_name,
                 "mimeType": "application/vnd.google-apps.folder",
                 "parents": [parent_id],
             }
 
-            folder = (
-                self.service.files()
+            folder = await asyncio.to_thread(
+                lambda: self.service.files()
                 .create(body=folder_metadata, fields="id")
                 .execute()
             )
