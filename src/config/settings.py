@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel
 
 
 class AppConfig(BaseSettings):
@@ -199,6 +200,95 @@ class StorageConfig(BaseSettings):
         return Path(v) if isinstance(v, str) else v
 
 
+class EmailParsingConfig(BaseModel):
+    """Configuration for email subject/body parsing."""
+
+    # Enable/disable email parsing
+    enable_subject_parsing: bool = Field(
+        default=True,
+        description="Parse claim data from email subjects"
+    )
+    enable_body_parsing: bool = Field(
+        default=True,
+        description="Parse claim data from email bodies"
+    )
+
+    # Confidence thresholds
+    min_field_confidence: float = Field(
+        default=0.70,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence to accept extracted field"
+    )
+
+    # Text extraction limits
+    max_body_length: int = Field(
+        default=10000,
+        description="Maximum email body length to process (characters)"
+    )
+
+    # Pattern matching
+    use_fuzzy_matching: bool = Field(
+        default=True,
+        description="Enable fuzzy string matching for names/providers"
+    )
+    fuzzy_threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Fuzzy match threshold (0.0-1.0)"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="EMAIL_PARSING_")
+
+
+class DataFusionConfig(BaseModel):
+    """Configuration for email+OCR data fusion."""
+
+    # Enable/disable fusion
+    enable_fusion: bool = Field(
+        default=True,
+        description="Merge email and OCR extractions"
+    )
+
+    # Confidence boosting
+    exact_match_boost: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=0.20,
+        description="Confidence boost for exact email/OCR agreement"
+    )
+    fuzzy_match_boost: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=0.10,
+        description="Confidence boost for fuzzy email/OCR agreement"
+    )
+
+    # Field preferences
+    prefer_ocr_fields: list[str] = Field(
+        default_factory=lambda: [
+            "provider_name", "total_amount", "service_date",
+            "receipt_number", "gst_sst_amount", "provider_address"
+        ],
+        description="Fields to prefer OCR extraction"
+    )
+    prefer_email_fields: list[str] = Field(
+        default_factory=lambda: [
+            "member_id", "member_name", "policy_number"
+        ],
+        description="Fields to prefer email extraction"
+    )
+
+    # Conflict resolution
+    log_conflicts: bool = Field(
+        default=True,
+        description="Log conflicts to sheets/logs"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="FUSION_")
+
+
 class Settings(BaseSettings):
     """Master settings combining all configuration sections."""
 
@@ -220,6 +310,10 @@ class Settings(BaseSettings):
     admin: AdminConfig = Field(default_factory=AdminConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+
+    # Phase 3: Email extraction
+    email_parsing: EmailParsingConfig = Field(default_factory=EmailParsingConfig)
+    data_fusion: DataFusionConfig = Field(default_factory=DataFusionConfig)
 
 
 # Global settings instance

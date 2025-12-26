@@ -10,10 +10,13 @@ from pathlib import Path
 from googleapiclient.errors import HttpError
 
 from src.config.settings import settings
+from src.models.extraction import EmailExtractionResult, ExtractedField
 from src.models.job import Job, JobStatus
+from src.services.email_parser import BodyTextParser, SubjectParser
 from src.services.email_service import EmailService
 from src.services.queue_service import QueueService
 from src.utils.deduplication import compute_file_hash
+from src.utils.email_text_extractor import EmailTextExtractor
 from src.utils.logging import configure_logging, get_logger
 
 configure_logging()
@@ -163,16 +166,77 @@ class EmailPollerWorker:
             logger.error("Polling error", error=str(e))
             raise
 
+    def _merge_email_extractions(
+        self,
+        subject_fields: dict[str, ExtractedField],
+        body_fields: dict[str, ExtractedField]
+    ) -> EmailExtractionResult:
+        """
+        Merge subject and body field extractions.
+
+        Strategy: Body fields take precedence (more context).
+        If a field exists in both, choose the one with higher confidence.
+
+        Args:
+            subject_fields: Fields extracted from email subject
+            body_fields: Fields extracted from email body
+
+        Returns:
+            Merged EmailExtractionResult
+        """
+        merged_fields = {}
+        all_field_names = set(subject_fields.keys()) | set(body_fields.keys())
+
+        for field_name in all_field_names:
+            subject_field = subject_fields.get(field_name)
+            body_field = body_fields.get(field_name)
+
+            # If only one source has the field, use it
+            if subject_field and not body_field:
+                merged_fields[field_name] = subject_field
+            elif body_field and not subject_field:
+                merged_fields[field_name] = body_field
+            else:
+                # Both have the field - choose higher confidence
+                # If confidences are equal, prefer body (more context)
+                if body_field.confidence >= subject_field.confidence:
+                    merged_fields[field_name] = body_field
+                else:
+                    merged_fields[field_name] = subject_field
+
+        # Calculate overall confidence as weighted average
+        # Weight body fields higher (2x) since they typically have more context
+        total_confidence = 0.0
+        total_weight = 0.0
+
+        for field_name, field in merged_fields.items():
+            if field.value:
+                # Determine source weight
+                is_from_body = field_name in body_fields and body_fields[field_name].value == field.value
+                weight = 2.0 if is_from_body else 1.0
+
+                total_confidence += field.confidence * weight
+                total_weight += weight
+
+        overall_confidence = total_confidence / total_weight if total_weight > 0 else 0.0
+
+        return EmailExtractionResult(
+            fields=merged_fields,
+            overall_confidence=overall_confidence,
+            extraction_timestamp=datetime.now()
+        )
+
     async def _process_email(self, email) -> None:
         """
         Process single email.
 
         Steps:
-        1. Download attachments
-        2. Compute hashes
-        3. Check for duplicates
-        4. Create jobs
-        5. Mark email processed
+        1. Parse email subject and body for claim data
+        2. Download attachments
+        3. Compute hashes
+        4. Check for duplicates
+        5. Create jobs
+        6. Mark email processed
         """
         logger.info(
             "Processing email",
@@ -180,6 +244,54 @@ class EmailPollerWorker:
             sender=email.sender,
             attachments=len(email.attachments),
         )
+
+        # Phase 3: Parse email subject and body for claim data
+        email_extraction = None
+        if settings.email_parsing.enable_subject_parsing or settings.email_parsing.enable_body_parsing:
+            try:
+                # Extract subject fields
+                subject_fields = {}
+                if settings.email_parsing.enable_subject_parsing:
+                    subject_fields = SubjectParser.extract_from_subject(email.subject)
+                    logger.info(
+                        "Subject parsed",
+                        message_id=email.message_id,
+                        fields_found=len([f for f in subject_fields.values() if f.value])
+                    )
+
+                # Extract body fields
+                body_fields = {}
+                if settings.email_parsing.enable_body_parsing:
+                    # Get email body text
+                    body_text = await self.email_service.get_message_body(email.message_id)
+
+                    if body_text:
+                        # Normalize text
+                        normalized_text = EmailTextExtractor.extract_text(body_text, 'text/plain')
+
+                        # Extract fields
+                        body_fields = await BodyTextParser.extract_from_body(normalized_text)
+
+                        logger.info(
+                            "Body parsed",
+                            message_id=email.message_id,
+                            body_length=len(body_text),
+                            fields_found=len([f for f in body_fields.values() if f.value])
+                        )
+
+                # Merge subject and body extractions
+                email_extraction = self._merge_email_extractions(subject_fields, body_fields)
+
+                # Store in EmailMetadata
+                email.parsed_fields = email_extraction
+
+            except Exception as e:
+                logger.error(
+                    "Email parsing failed",
+                    message_id=email.message_id,
+                    error=str(e)
+                )
+                # Continue processing even if parsing fails
 
         processed_count = 0
 
@@ -206,7 +318,28 @@ class EmailPollerWorker:
                     destination.unlink()  # Delete duplicate
                     continue
 
-                # Create job
+                # Create job with email extraction metadata
+                email_extraction_metadata = None
+                if email_extraction:
+                    # Get field names that had values extracted
+                    subject_field_names = [
+                        name for name, field in subject_fields.items()
+                        if field.value
+                    ] if subject_fields else []
+
+                    body_field_names = [
+                        name for name, field in body_fields.items()
+                        if field.value
+                    ] if body_fields else []
+
+                    email_extraction_metadata = {
+                        "parsed_at": datetime.now().isoformat(),
+                        "subject_fields": subject_field_names,
+                        "body_fields": body_field_names,
+                        "overall_confidence": email_extraction.overall_confidence,
+                        "total_fields_extracted": len([f for f in email_extraction.fields.values() if f.value])
+                    }
+
                 job = Job(
                     id=f"job_{uuid.uuid4().hex}",
                     email_id=email.message_id,
@@ -216,6 +349,7 @@ class EmailPollerWorker:
                     status=JobStatus.PENDING,
                     created_at=datetime.now(),
                     updated_at=datetime.now(),
+                    email_extraction_metadata=email_extraction_metadata,
                 )
 
                 # Enqueue job
