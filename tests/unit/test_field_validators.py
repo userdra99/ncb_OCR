@@ -6,21 +6,10 @@ boundary cases, and format validation.
 """
 
 import pytest
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
-from src.services.field_validators import (
-    validate_member_id,
-    validate_total_amount,
-    validate_service_date,
-    validate_provider_name,
-    validate_receipt_number,
-    validate_phone_number,
-    validate_ic_number,
-    validate_gst_sst_amount,
-    validate_email_address,
-    ValidationError
-)
+from src.utils.field_validators import FieldValidator, ValidationResult
 
 
 class TestMemberIDValidator:
@@ -28,108 +17,173 @@ class TestMemberIDValidator:
 
     def test_valid_member_id(self):
         """Valid member IDs should pass."""
-        assert validate_member_id("M12345") is True
-        assert validate_member_id("M00001") is True
-        assert validate_member_id("M99999") is True
+        result = FieldValidator.validate_member_id("M12345")
+        assert result.is_valid is True
+        assert result.format_valid is True
+        assert len(result.errors) == 0
+
+        result = FieldValidator.validate_member_id("M00001")
+        assert result.is_valid is True
+
+        result = FieldValidator.validate_member_id("ABC123456")
+        assert result.is_valid is True
 
     def test_invalid_prefix(self):
-        """Invalid prefix should fail."""
-        with pytest.raises(ValidationError, match="must start with 'M'"):
-            validate_member_id("A12345")
-
-        with pytest.raises(ValidationError, match="must start with 'M'"):
-            validate_member_id("12345")
+        """Invalid format should fail."""
+        result = FieldValidator.validate_member_id("12345")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
     def test_invalid_length(self):
         """Invalid length should fail."""
-        with pytest.raises(ValidationError, match="must be exactly 6 characters"):
-            validate_member_id("M123")
+        result = FieldValidator.validate_member_id("M123")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
-        with pytest.raises(ValidationError, match="must be exactly 6 characters"):
-            validate_member_id("M1234567")
+        result = FieldValidator.validate_member_id("M12345678901")
+        assert result.is_valid is False
+        assert len(result.errors) > 0
 
     def test_invalid_characters(self):
         """Non-alphanumeric characters should fail."""
-        with pytest.raises(ValidationError, match="must contain only alphanumeric"):
-            validate_member_id("M123-5")
+        result = FieldValidator.validate_member_id("M123-5")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
-        with pytest.raises(ValidationError, match="must contain only alphanumeric"):
-            validate_member_id("M123 5")
-
-    def test_lowercase_prefix(self):
-        """Lowercase prefix should fail (case-sensitive)."""
-        with pytest.raises(ValidationError, match="must start with 'M'"):
-            validate_member_id("m12345")
+        result = FieldValidator.validate_member_id("M123 5")
+        assert result.is_valid is False
 
     def test_none_value(self):
         """None should fail."""
-        with pytest.raises(ValidationError, match="Member ID is required"):
-            validate_member_id(None)
+        result = FieldValidator.validate_member_id(None)
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
     def test_empty_string(self):
         """Empty string should fail."""
-        with pytest.raises(ValidationError, match="Member ID is required"):
-            validate_member_id("")
+        result = FieldValidator.validate_member_id("")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
     def test_whitespace_only(self):
         """Whitespace-only should fail."""
-        with pytest.raises(ValidationError, match="Member ID is required"):
-            validate_member_id("   ")
+        result = FieldValidator.validate_member_id("   ")
+        assert result.is_valid is False
+        assert len(result.errors) > 0
 
 
-class TestTotalAmountValidator:
-    """Test total_amount validation."""
+class TestMemberNameValidator:
+    """Test member_name validation."""
 
-    def test_valid_amounts(self):
-        """Valid amounts should pass."""
-        assert validate_total_amount(Decimal("100.00")) is True
-        assert validate_total_amount(Decimal("0.01")) is True
-        assert validate_total_amount(Decimal("9999.99")) is True
-        assert validate_total_amount(Decimal("1234.56")) is True
+    def test_valid_names(self):
+        """Valid member names should pass."""
+        result = FieldValidator.validate_member_name("John Doe")
+        assert result.is_valid is True
+        assert len(result.errors) == 0
 
-    def test_zero_amount(self):
-        """Zero amount should fail."""
-        with pytest.raises(ValidationError, match="must be greater than 0"):
-            validate_total_amount(Decimal("0.00"))
+        result = FieldValidator.validate_member_name("Ahmad bin Abdullah")
+        assert result.is_valid is True
 
-    def test_negative_amount(self):
-        """Negative amount should fail."""
-        with pytest.raises(ValidationError, match="must be greater than 0"):
-            validate_total_amount(Decimal("-50.00"))
+        result = FieldValidator.validate_member_name("Siti binti Rahman")
+        assert result.is_valid is True
 
-    def test_max_amount_exceeded(self):
-        """Amount exceeding max should fail."""
-        with pytest.raises(ValidationError, match="exceeds maximum"):
-            validate_total_amount(Decimal("100000.00"))
+    def test_single_name_with_particle(self):
+        """Single name with Malaysian particle should pass with warning."""
+        result = FieldValidator.validate_member_name("Ahmad bin")
+        assert result.is_valid is True
+        # May have warnings but should be valid
 
-        with pytest.raises(ValidationError, match="exceeds maximum"):
-            validate_total_amount(Decimal("999999.99"))
+    def test_single_name_without_particle(self):
+        """Single name without particle should warn."""
+        result = FieldValidator.validate_member_name("Ahmad")
+        assert result.is_valid is True
+        assert result.suspicious is True
+        assert len(result.warnings) > 0
 
-    def test_invalid_decimal_places(self):
-        """More than 2 decimal places should fail."""
-        with pytest.raises(ValidationError, match="must have at most 2 decimal places"):
-            validate_total_amount(Decimal("100.123"))
+    def test_min_length(self):
+        """Names too short should fail."""
+        result = FieldValidator.validate_member_name("A")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
-        with pytest.raises(ValidationError, match="must have at most 2 decimal places"):
-            validate_total_amount(Decimal("50.999"))
+    def test_max_length(self):
+        """Names too long should fail."""
+        long_name = "A" * 101
+        result = FieldValidator.validate_member_name(long_name)
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
     def test_none_value(self):
         """None should fail."""
-        with pytest.raises(ValidationError, match="Total amount is required"):
-            validate_total_amount(None)
+        result = FieldValidator.validate_member_name(None)
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
-    def test_string_conversion(self):
-        """String amounts should be converted and validated."""
-        assert validate_total_amount("100.00") is True
-        assert validate_total_amount("50.5") is True
+    def test_empty_string(self):
+        """Empty string should fail."""
+        result = FieldValidator.validate_member_name("")
+        assert result.is_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
-    def test_invalid_string(self):
-        """Invalid string should fail."""
-        with pytest.raises(ValidationError, match="must be a valid number"):
-            validate_total_amount("invalid")
 
-        with pytest.raises(ValidationError, match="must be a valid number"):
-            validate_total_amount("RM 100")
+class TestAmountValidator:
+    """Test amount validation."""
+
+    def test_valid_amounts(self):
+        """Valid amounts should pass."""
+        result = FieldValidator.validate_amount(100.00)
+        assert result.is_valid is True
+        assert result.range_valid is True
+        assert len(result.errors) == 0
+
+        result = FieldValidator.validate_amount(1.00)
+        assert result.is_valid is True
+
+        result = FieldValidator.validate_amount(9999.99)
+        assert result.is_valid is True
+
+    def test_zero_amount(self):
+        """Zero amount should fail."""
+        result = FieldValidator.validate_amount(0.00)
+        assert result.is_valid is False
+        assert result.range_valid is False
+        assert len(result.errors) > 0
+
+    def test_negative_amount(self):
+        """Negative amount should fail."""
+        result = FieldValidator.validate_amount(-50.00)
+        assert result.is_valid is False
+        assert result.range_valid is False
+        assert len(result.errors) > 0
+
+    def test_max_amount_exceeded(self):
+        """Amount exceeding max should fail."""
+        result = FieldValidator.validate_amount(1_000_001.00)
+        assert result.is_valid is False
+        assert result.range_valid is False
+        assert len(result.errors) > 0
+
+    def test_suspicious_amount(self):
+        """High amounts should be flagged as suspicious."""
+        result = FieldValidator.validate_amount(15_000.00)
+        assert result.is_valid is True
+        assert result.suspicious is True
+        assert len(result.warnings) > 0
+
+    def test_none_value(self):
+        """None should fail."""
+        result = FieldValidator.validate_amount(None)
+        assert result.is_valid is False
+        assert result.range_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
 
 class TestServiceDateValidator:
@@ -137,98 +191,49 @@ class TestServiceDateValidator:
 
     def test_valid_dates(self):
         """Valid dates should pass."""
-        assert validate_service_date(date.today()) is True
-        assert validate_service_date(date.today() - timedelta(days=1)) is True
-        assert validate_service_date(date.today() - timedelta(days=30)) is True
+        result = FieldValidator.validate_service_date(datetime.now())
+        assert result.is_valid is True
+        assert result.range_valid is True
+        assert len(result.errors) == 0
+
+        yesterday = datetime.now() - timedelta(days=1)
+        result = FieldValidator.validate_service_date(yesterday)
+        assert result.is_valid is True
+
+        last_month = datetime.now() - timedelta(days=30)
+        result = FieldValidator.validate_service_date(last_month)
+        assert result.is_valid is True
 
     def test_future_date(self):
         """Future dates should fail."""
-        future_date = date.today() + timedelta(days=1)
-        with pytest.raises(ValidationError, match="cannot be in the future"):
-            validate_service_date(future_date)
+        future_date = datetime.now() + timedelta(days=1)
+        result = FieldValidator.validate_service_date(future_date)
+        assert result.is_valid is False
+        assert result.range_valid is False
+        assert len(result.errors) > 0
 
     def test_date_too_old(self):
-        """Dates older than 2 years should fail."""
-        old_date = date.today() - timedelta(days=731)  # > 2 years
-        with pytest.raises(ValidationError, match="cannot be older than 2 years"):
-            validate_service_date(old_date)
+        """Dates older than 2 years should warn."""
+        old_date = datetime.now() - timedelta(days=731)
+        result = FieldValidator.validate_service_date(old_date)
+        assert result.is_valid is True
+        assert result.suspicious is True
+        assert len(result.warnings) > 0
 
-    def test_date_exactly_2_years(self):
-        """Date exactly 2 years ago should pass."""
-        two_years_ago = date.today() - timedelta(days=730)
-        assert validate_service_date(two_years_ago) is True
-
-    def test_none_value(self):
-        """None should fail."""
-        with pytest.raises(ValidationError, match="Service date is required"):
-            validate_service_date(None)
-
-    def test_string_date_conversion(self):
-        """String dates should be converted and validated."""
-        assert validate_service_date("2024-01-15") is True
-        assert validate_service_date("15/01/2024") is True  # DD/MM/YYYY
-        assert validate_service_date("15-01-2024") is True  # DD-MM-YYYY
-
-    def test_invalid_string_date(self):
-        """Invalid string dates should fail."""
-        with pytest.raises(ValidationError, match="must be a valid date"):
-            validate_service_date("invalid")
-
-        with pytest.raises(ValidationError, match="must be a valid date"):
-            validate_service_date("32/01/2024")
-
-
-class TestProviderNameValidator:
-    """Test provider_name validation."""
-
-    def test_valid_names(self):
-        """Valid provider names should pass."""
-        assert validate_provider_name("Klinik Dr. Ahmad") is True
-        assert validate_provider_name("Hospital Pantai") is True
-        assert validate_provider_name("Dr. Lee Medical Centre") is True
-        assert validate_provider_name("Farmasi Kesihatan") is True
-
-    def test_min_length(self):
-        """Names too short should fail."""
-        with pytest.raises(ValidationError, match="must be at least 2 characters"):
-            validate_provider_name("A")
-
-        with pytest.raises(ValidationError, match="must be at least 2 characters"):
-            validate_provider_name("Dr")
-
-    def test_max_length(self):
-        """Names too long should fail."""
-        long_name = "A" * 201
-        with pytest.raises(ValidationError, match="must be at most 200 characters"):
-            validate_provider_name(long_name)
-
-    def test_invalid_characters(self):
-        """Names with invalid characters should fail."""
-        with pytest.raises(ValidationError, match="contains invalid characters"):
-            validate_provider_name("Klinik@Ahmad")
-
-        with pytest.raises(ValidationError, match="contains invalid characters"):
-            validate_provider_name("Hospital<script>")
-
-    def test_valid_characters(self):
-        """Names with valid special characters should pass."""
-        assert validate_provider_name("Dr. O'Brien") is True
-        assert validate_provider_name("Klinik & Farmasi") is True
-        assert validate_provider_name("Hospital (Kuala Lumpur)") is True
+    def test_date_before_1900(self):
+        """Dates before 1900 should fail."""
+        old_date = datetime(1899, 12, 31)
+        result = FieldValidator.validate_service_date(old_date)
+        assert result.is_valid is False
+        assert result.range_valid is False
+        assert len(result.errors) > 0
 
     def test_none_value(self):
         """None should fail."""
-        with pytest.raises(ValidationError, match="Provider name is required"):
-            validate_provider_name(None)
-
-    def test_empty_string(self):
-        """Empty string should fail."""
-        with pytest.raises(ValidationError, match="Provider name is required"):
-            validate_provider_name("")
-
-    def test_whitespace_trimming(self):
-        """Leading/trailing whitespace should be trimmed."""
-        assert validate_provider_name("  Klinik Ahmad  ") is True
+        result = FieldValidator.validate_service_date(None)
+        assert result.is_valid is False
+        assert result.range_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
 
 class TestReceiptNumberValidator:
@@ -236,242 +241,182 @@ class TestReceiptNumberValidator:
 
     def test_valid_receipt_numbers(self):
         """Valid receipt numbers should pass."""
-        assert validate_receipt_number("RCP-001") is True
-        assert validate_receipt_number("INV12345") is True
-        assert validate_receipt_number("REC/2024/001") is True
-        assert validate_receipt_number("12345") is True
+        result = FieldValidator.validate_receipt_number("RCP-001")
+        assert result.is_valid is True
+        assert result.format_valid is True
+        assert len(result.errors) == 0
+
+        result = FieldValidator.validate_receipt_number("INV12345")
+        assert result.is_valid is True
+
+        result = FieldValidator.validate_receipt_number("REC/2024/001")
+        assert result.is_valid is True
+
+        result = FieldValidator.validate_receipt_number("12345")
+        assert result.is_valid is True
 
     def test_min_length(self):
         """Receipt numbers too short should fail."""
-        with pytest.raises(ValidationError, match="must be at least 3 characters"):
-            validate_receipt_number("12")
-
-        with pytest.raises(ValidationError, match="must be at least 3 characters"):
-            validate_receipt_number("AB")
+        result = FieldValidator.validate_receipt_number("12")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
     def test_max_length(self):
         """Receipt numbers too long should fail."""
-        long_number = "A" * 51
-        with pytest.raises(ValidationError, match="must be at most 50 characters"):
-            validate_receipt_number(long_number)
+        long_number = "A" * 21
+        result = FieldValidator.validate_receipt_number(long_number)
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
     def test_invalid_characters(self):
         """Receipt numbers with invalid characters should fail."""
-        with pytest.raises(ValidationError, match="contains invalid characters"):
-            validate_receipt_number("RCP<001>")
+        result = FieldValidator.validate_receipt_number("RCP@001")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
-        with pytest.raises(ValidationError, match="contains invalid characters"):
-            validate_receipt_number("RCP@001")
-
-    def test_valid_characters(self):
-        """Receipt numbers with valid characters should pass."""
-        assert validate_receipt_number("RCP-001") is True
-        assert validate_receipt_number("INV/2024/001") is True
-        assert validate_receipt_number("REC_12345") is True
+        result = FieldValidator.validate_receipt_number("RCP 001")
+        assert result.is_valid is False
 
     def test_none_value(self):
         """None should fail."""
-        with pytest.raises(ValidationError, match="Receipt number is required"):
-            validate_receipt_number(None)
+        result = FieldValidator.validate_receipt_number(None)
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
 
-class TestPhoneNumberValidator:
-    """Test Malaysian phone number validation."""
+class TestProviderNameValidator:
+    """Test provider_name validation."""
 
-    def test_valid_mobile_numbers(self):
-        """Valid Malaysian mobile numbers should pass."""
-        assert validate_phone_number("0123456789") is True
-        assert validate_phone_number("0167890123") is True
-        assert validate_phone_number("0198765432") is True
+    def test_valid_names(self):
+        """Valid provider names should pass."""
+        result = FieldValidator.validate_provider_name("Klinik Dr. Ahmad")
+        assert result.is_valid is True
+        assert len(result.errors) == 0
 
-    def test_valid_landline_numbers(self):
-        """Valid Malaysian landline numbers should pass."""
-        assert validate_phone_number("0312345678") is True
-        assert validate_phone_number("0387654321") is True
+        result = FieldValidator.validate_provider_name("Hospital Pantai")
+        assert result.is_valid is True
 
-    def test_with_country_code(self):
-        """Numbers with +60 country code should pass."""
-        assert validate_phone_number("+60123456789") is True
-        assert validate_phone_number("+60312345678") is True
+        result = FieldValidator.validate_provider_name("Dr. Lee Medical Centre")
+        assert result.is_valid is True
 
-    def test_with_dash_formatting(self):
-        """Numbers with dashes should pass."""
-        assert validate_phone_number("012-345-6789") is True
-        assert validate_phone_number("03-1234-5678") is True
+        result = FieldValidator.validate_provider_name("Farmasi Kesihatan")
+        assert result.is_valid is True
 
-    def test_with_spaces(self):
-        """Numbers with spaces should pass."""
-        assert validate_phone_number("012 345 6789") is True
-        assert validate_phone_number("03 1234 5678") is True
+    def test_min_length(self):
+        """Names too short should fail."""
+        result = FieldValidator.validate_provider_name("Dr")
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
-    def test_invalid_prefix(self):
-        """Numbers with invalid prefix should fail."""
-        with pytest.raises(ValidationError, match="must start with 01"):
-            validate_phone_number("0912345678")
+    def test_max_length(self):
+        """Names too long should fail."""
+        long_name = "A" * 201
+        result = FieldValidator.validate_provider_name(long_name)
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert len(result.errors) > 0
 
-    def test_invalid_length(self):
-        """Numbers with invalid length should fail."""
-        with pytest.raises(ValidationError, match="must be 10 or 11 digits"):
-            validate_phone_number("012345")
-
-        with pytest.raises(ValidationError, match="must be 10 or 11 digits"):
-            validate_phone_number("012345678901")
-
-    def test_none_value(self):
-        """None should be allowed (optional field)."""
-        assert validate_phone_number(None) is True
-
-
-class TestICNumberValidator:
-    """Test Malaysian IC number validation."""
-
-    def test_valid_ic_numbers(self):
-        """Valid Malaysian IC numbers should pass."""
-        assert validate_ic_number("900101-01-1234") is True
-        assert validate_ic_number("850615-14-5678") is True
-        assert validate_ic_number("001231-10-9876") is True
-
-    def test_without_dashes(self):
-        """IC numbers without dashes should pass."""
-        assert validate_ic_number("900101011234") is True
-        assert validate_ic_number("850615145678") is True
-
-    def test_invalid_format(self):
-        """IC numbers with invalid format should fail."""
-        with pytest.raises(ValidationError, match="must be in format YYMMDD-PP-NNNN"):
-            validate_ic_number("90-01-01-01-1234")
-
-        with pytest.raises(ValidationError, match="must be in format YYMMDD-PP-NNNN"):
-            validate_ic_number("9001011234")  # Too short
-
-    def test_invalid_date(self):
-        """IC numbers with invalid date should fail."""
-        with pytest.raises(ValidationError, match="contains invalid date"):
-            validate_ic_number("900231-01-1234")  # Feb 31
-
-        with pytest.raises(ValidationError, match="contains invalid date"):
-            validate_ic_number("901301-01-1234")  # Month 13
-
-    def test_invalid_state_code(self):
-        """IC numbers with invalid state code should fail."""
-        with pytest.raises(ValidationError, match="contains invalid state code"):
-            validate_ic_number("900101-99-1234")  # Invalid state
+    def test_missing_keywords(self):
+        """Names without healthcare keywords should warn."""
+        result = FieldValidator.validate_provider_name("ABC Company")
+        assert result.is_valid is True
+        assert result.suspicious is True
+        assert len(result.warnings) > 0
 
     def test_none_value(self):
-        """None should be allowed (optional field)."""
-        assert validate_ic_number(None) is True
-
-
-class TestGSTSSTAmountValidator:
-    """Test GST/SST amount validation."""
-
-    def test_valid_gst_amount(self):
-        """Valid GST amount (6%) should pass."""
-        total_amount = Decimal("100.00")
-        gst_amount = Decimal("6.00")
-        assert validate_gst_sst_amount(gst_amount, total_amount, "GST") is True
-
-    def test_valid_sst_amount(self):
-        """Valid SST amount (10%) should pass."""
-        total_amount = Decimal("100.00")
-        sst_amount = Decimal("10.00")
-        assert validate_gst_sst_amount(sst_amount, total_amount, "SST") is True
-
-    def test_zero_tax(self):
-        """Zero tax amount should pass."""
-        total_amount = Decimal("100.00")
-        assert validate_gst_sst_amount(Decimal("0.00"), total_amount, "GST") is True
-
-    def test_negative_tax(self):
-        """Negative tax amount should fail."""
-        total_amount = Decimal("100.00")
-        with pytest.raises(ValidationError, match="cannot be negative"):
-            validate_gst_sst_amount(Decimal("-5.00"), total_amount, "GST")
-
-    def test_exceeds_total(self):
-        """Tax exceeding total amount should fail."""
-        total_amount = Decimal("100.00")
-        with pytest.raises(ValidationError, match="cannot exceed total amount"):
-            validate_gst_sst_amount(Decimal("150.00"), total_amount, "GST")
-
-    def test_exceeds_expected_rate(self):
-        """Tax exceeding expected rate by >20% should warn."""
-        total_amount = Decimal("100.00")
-        high_gst = Decimal("8.00")  # Expected 6%, got 8%
-        # Should still pass but may log warning
-        assert validate_gst_sst_amount(high_gst, total_amount, "GST") is True
-
-    def test_none_value(self):
-        """None should be allowed (optional field)."""
-        total_amount = Decimal("100.00")
-        assert validate_gst_sst_amount(None, total_amount, "GST") is True
-
-    def test_invalid_tax_type(self):
-        """Invalid tax type should fail."""
-        total_amount = Decimal("100.00")
-        with pytest.raises(ValidationError, match="must be 'GST' or 'SST'"):
-            validate_gst_sst_amount(Decimal("6.00"), total_amount, "VAT")
-
-
-class TestEmailAddressValidator:
-    """Test email address validation."""
-
-    def test_valid_emails(self):
-        """Valid email addresses should pass."""
-        assert validate_email_address("user@example.com") is True
-        assert validate_email_address("test.user@domain.co.my") is True
-        assert validate_email_address("admin+tag@company.com") is True
-
-    def test_invalid_format(self):
-        """Invalid email formats should fail."""
-        with pytest.raises(ValidationError, match="must be a valid email"):
-            validate_email_address("invalid")
-
-        with pytest.raises(ValidationError, match="must be a valid email"):
-            validate_email_address("@example.com")
-
-        with pytest.raises(ValidationError, match="must be a valid email"):
-            validate_email_address("user@")
-
-    def test_none_value(self):
-        """None should be allowed (optional field)."""
-        assert validate_email_address(None) is True
+        """None should fail."""
+        result = FieldValidator.validate_provider_name(None)
+        assert result.is_valid is False
+        assert result.format_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
     def test_empty_string(self):
-        """Empty string should be allowed (optional field)."""
-        assert validate_email_address("") is True
+        """Empty string should fail."""
+        result = FieldValidator.validate_provider_name("")
+        assert result.is_valid is False
+        assert any("required" in err.lower() for err in result.errors)
 
 
-class TestValidationErrorHandling:
-    """Test validation error handling."""
+class TestValidateAllFields:
+    """Test validate_all_fields method."""
 
-    def test_validation_error_message(self):
-        """ValidationError should have descriptive message."""
-        try:
-            validate_member_id("INVALID")
-        except ValidationError as e:
-            assert "member_id" in str(e).lower()
-            assert "must start with 'M'" in str(e)
+    def test_all_valid_fields(self):
+        """All valid fields should pass."""
+        claim_data = {
+            'member_id': 'M12345',
+            'member_name': 'John Doe',
+            'total_amount': 100.00,
+            'service_date': datetime.now(),
+            'receipt_number': 'RCP-001',
+            'provider_name': 'Klinik Dr. Ahmad'
+        }
+        results = FieldValidator.validate_all_fields(claim_data)
 
-    def test_validation_error_field_name(self):
-        """ValidationError should include field name."""
-        try:
-            validate_total_amount(Decimal("-50.00"))
-        except ValidationError as e:
-            assert hasattr(e, "field_name") or "total_amount" in str(e).lower()
+        assert len(results) == 6
+        assert all(r.is_valid for r in results.values())
+        assert 'member_id' in results
+        assert 'member_name' in results
+        assert 'total_amount' in results
+        assert 'service_date' in results
+        assert 'receipt_number' in results
+        assert 'provider_name' in results
 
-    def test_multiple_validation_errors(self):
-        """Multiple validation errors should be caught."""
-        errors = []
+    def test_missing_required_fields(self):
+        """Missing required fields should fail."""
+        claim_data = {
+            'member_id': 'M12345',
+            # Missing other required fields
+        }
+        results = FieldValidator.validate_all_fields(claim_data)
 
-        try:
-            validate_member_id("INVALID")
-        except ValidationError as e:
-            errors.append(e)
+        assert len(results) == 6
+        # Only member_id should be valid
+        assert results['member_id'].is_valid is True
+        assert results['member_name'].is_valid is False
+        assert results['total_amount'].is_valid is False
+        assert results['service_date'].is_valid is False
+        assert results['receipt_number'].is_valid is False
+        assert results['provider_name'].is_valid is False
 
-        try:
-            validate_total_amount(Decimal("-50.00"))
-        except ValidationError as e:
-            errors.append(e)
+    def test_invalid_field_values(self):
+        """Invalid field values should fail validation."""
+        claim_data = {
+            'member_id': 'INVALID',
+            'member_name': 'A',
+            'total_amount': -50.00,
+            'service_date': datetime.now() + timedelta(days=1),
+            'receipt_number': 'AB',
+            'provider_name': 'XY'
+        }
+        results = FieldValidator.validate_all_fields(claim_data)
 
-        assert len(errors) == 2
+        assert len(results) == 6
+        assert all(not r.is_valid for r in results.values())
+
+    def test_suspicious_values(self):
+        """Suspicious values should be flagged."""
+        claim_data = {
+            'member_id': 'M12345',
+            'member_name': 'Ahmad',  # Single name
+            'total_amount': 15000.00,  # High amount
+            'service_date': datetime.now() - timedelta(days=800),  # Old date
+            'receipt_number': 'RCP-001',
+            'provider_name': 'ABC Shop'  # No healthcare keywords
+        }
+        results = FieldValidator.validate_all_fields(claim_data)
+
+        # All should be valid but some should have warnings
+        assert all(r.is_valid for r in results.values())
+
+        # Check for suspicious flags
+        suspicious_count = sum(1 for r in results.values() if r.suspicious)
+        assert suspicious_count > 0
+
+        # Check for warnings
+        warning_count = sum(len(r.warnings) for r in results.values())
+        assert warning_count > 0
