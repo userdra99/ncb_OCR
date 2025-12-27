@@ -7,7 +7,7 @@ multi-language support, and missing field handling.
 
 import pytest
 from datetime import datetime
-from src.services.email_parser import BodyParser, ExtractedField
+from src.services.email_parser import BodyParser, EmailFieldExtraction
 
 
 class TestBodyParserRequiredFields:

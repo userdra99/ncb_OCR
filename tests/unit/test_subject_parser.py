@@ -6,7 +6,7 @@ provider name extraction, confidence scoring, and edge cases.
 """
 
 import pytest
-from src.services.email_parser import SubjectParser, ExtractedField
+from src.services.email_parser import SubjectParser, EmailFieldExtraction
 
 
 class TestSubjectParserMemberID:

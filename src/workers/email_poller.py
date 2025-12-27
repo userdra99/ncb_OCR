@@ -10,7 +10,7 @@ from pathlib import Path
 from googleapiclient.errors import HttpError
 
 from src.config.settings import settings
-from src.models.extraction import EmailExtractionResult, ExtractedField
+from src.models.extraction import EmailExtractionResult, EmailFieldExtraction
 from src.models.job import Job, JobStatus
 from src.services.email_parser import BodyTextParser, SubjectParser
 from src.services.email_service import EmailService
@@ -168,8 +168,8 @@ class EmailPollerWorker:
 
     def _merge_email_extractions(
         self,
-        subject_fields: dict[str, ExtractedField],
-        body_fields: dict[str, ExtractedField]
+        subject_fields: dict[str, EmailFieldExtraction],
+        body_fields: dict[str, EmailFieldExtraction]
     ) -> EmailExtractionResult:
         """
         Merge subject and body field extractions.
